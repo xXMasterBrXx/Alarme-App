@@ -86,12 +86,12 @@ object GitHubUpdateManager {
                 }
 
                 val currentVersion = BuildConfig.VERSION_NAME
-                val remoteVersion = tagName.removePrefix("v").trim()
-                val isNewer = isVersionNewer(remoteVersion, currentVersion)
+                val remoteVersion = tagName.removePrefix("v").removePrefix("V").trim()
+                val isNewer = isVersionNewer(tagName, currentVersion)
 
                 val info = AppReleaseInfo(
                     tagName = tagName,
-                    versionName = remoteVersion,
+                    versionName = if (remoteVersion.isNotBlank()) remoteVersion else tagName,
                     releaseTitle = name,
                     changelog = body,
                     publishedAt = publishedAt,
@@ -110,25 +110,35 @@ object GitHubUpdateManager {
         }
     }
 
-    private fun isVersionNewer(remote: String, current: String): Boolean {
-        if (remote.isBlank()) return false
-        if (remote.equals(current, ignoreCase = true)) return false
+    private fun extractVersionNumbers(raw: String): List<Int> {
+        val regex = Regex("\\d+")
+        return regex.findAll(raw).mapNotNull { it.value.toIntOrNull() }.toList()
+    }
 
-        try {
-            val remoteParts = remote.split(".").mapNotNull { it.takeWhile { char -> char.isDigit() }.toIntOrNull() }
-            val currentParts = current.split(".").mapNotNull { it.takeWhile { char -> char.isDigit() }.toIntOrNull() }
+    private fun isVersionNewer(remoteTag: String, currentVersionStr: String): Boolean {
+        val cleanRemoteTag = remoteTag.trim()
+        val cleanCurrent = currentVersionStr.trim()
+        if (cleanRemoteTag.isBlank()) return false
 
-            val maxLen = maxOf(remoteParts.size, currentParts.size)
+        val remoteNums = extractVersionNumbers(cleanRemoteTag)
+        val currentNums = extractVersionNumbers(cleanCurrent)
+
+        if (remoteNums.isNotEmpty() && currentNums.isNotEmpty()) {
+            val maxLen = maxOf(remoteNums.size, currentNums.size)
             for (i in 0 until maxLen) {
-                val r = remoteParts.getOrElse(i) { 0 }
-                val c = currentParts.getOrElse(i) { 0 }
+                val r = remoteNums.getOrElse(i) { 0 }
+                val c = currentNums.getOrElse(i) { 0 }
                 if (r > c) return true
                 if (r < c) return false
             }
-        } catch (_: Exception) {
-            return remote != current
         }
-        return false
+
+        val normalizedRemote = cleanRemoteTag.removePrefix("v").removePrefix("V").trim()
+        val normalizedCurrent = cleanCurrent.removePrefix("v").removePrefix("V").trim()
+
+        return normalizedRemote.isNotBlank() &&
+                normalizedCurrent.isNotBlank() &&
+                !normalizedRemote.equals(normalizedCurrent, ignoreCase = true)
     }
 
     suspend fun downloadAndInstallApk(

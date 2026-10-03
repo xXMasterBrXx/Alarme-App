@@ -97,7 +97,7 @@ fun AppUpdateDialog(
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = "${releaseInfo.tagName} (Atual: v${BuildConfig.VERSION_NAME})",
+                    text = "${releaseInfo.tagName} (Atual: v${BuildConfig.VERSION_NAME.removePrefix("v")})",
                     style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.primary,
                     fontWeight = FontWeight.SemiBold
