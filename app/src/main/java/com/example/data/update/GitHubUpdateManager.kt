@@ -141,18 +141,14 @@ object GitHubUpdateManager {
                 !normalizedRemote.equals(normalizedCurrent, ignoreCase = true)
     }
 
-    fun saveInstalledTag(context: Context, tag: String) {
-        if (tag.isBlank()) return
-        val prefs = context.getSharedPreferences("chrono_prefs", Context.MODE_PRIVATE)
-        prefs.edit().putString("installed_release_tag", tag.trim()).apply()
-    }
-
     fun getInstalledVersionDisplay(context: Context): String {
-        val prefs = context.getSharedPreferences("chrono_prefs", Context.MODE_PRIVATE)
-        val savedTag = prefs.getString("installed_release_tag", null)
-        if (!savedTag.isNullOrBlank()) {
-            return savedTag
-        }
+        try {
+            val prefs = context.getSharedPreferences("chrono_prefs", Context.MODE_PRIVATE)
+            if (prefs.contains("installed_release_tag")) {
+                prefs.edit().remove("installed_release_tag").apply()
+            }
+        } catch (_: Exception) {}
+
         val ver = BuildConfig.VERSION_NAME.trim()
         return if (ver.startsWith("v") || ver.startsWith("V")) ver else "v$ver"
     }
@@ -228,9 +224,6 @@ object GitHubUpdateManager {
 
             withContext(Dispatchers.Main) {
                 onProgress(1f)
-                if (releaseTag.isNotBlank()) {
-                    saveInstalledTag(context, releaseTag)
-                }
                 installApk(context, destinationFile, onError)
             }
         } catch (e: Exception) {
