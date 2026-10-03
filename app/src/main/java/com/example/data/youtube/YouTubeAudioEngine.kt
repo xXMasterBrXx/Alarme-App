@@ -23,7 +23,6 @@ object YouTubeAudioEngine {
     private val _currentPlaybackState = mutableStateOf<YouTubePlaybackState?>(null)
     val currentPlaybackState: State<YouTubePlaybackState?> = _currentPlaybackState
 
-    private var fallbackWebView: WebView? = null
     private val mainHandler = Handler(Looper.getMainLooper())
     private var previewTimeoutRunnable: Runnable? = null
 
@@ -38,24 +37,6 @@ object YouTubeAudioEngine {
                 volumePercent = volPercent,
                 isLoop = true
             )
-
-            // Also spin up a background headless instance for background receiver alarms
-            try {
-                val webView = WebView(context.applicationContext).apply {
-                    settings.javaScriptEnabled = true
-                    settings.mediaPlaybackRequiresUserGesture = false
-                    settings.domStorageEnabled = true
-                    settings.databaseEnabled = true
-                    settings.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-                    settings.userAgentString = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
-                    webViewClient = WebViewClient()
-                    webChromeClient = WebChromeClient()
-                }
-                val html = createYouTubePlayerHtml(videoId, volPercent, loop = true)
-                webView.loadDataWithBaseURL("https://www.youtube-nocookie.com", html, "text/html", "UTF-8", null)
-                fallbackWebView = webView
-            } catch (_: Exception) {
-            }
         }
     }
 
@@ -103,14 +84,6 @@ object YouTubeAudioEngine {
             previewTimeoutRunnable?.let { mainHandler.removeCallbacks(it) }
             previewTimeoutRunnable = null
             _currentPlaybackState.value = null
-
-            try {
-                fallbackWebView?.loadUrl("about:blank")
-                fallbackWebView?.destroy()
-            } catch (_: Exception) {
-            } finally {
-                fallbackWebView = null
-            }
         }
     }
 
@@ -123,15 +96,11 @@ object YouTubeAudioEngine {
                 <meta name="viewport" content="width=device-width, initial-scale=1.0">
                 <style>
                     html, body { margin:0; padding:0; background:#000; overflow:hidden; width:100%; height:100%; }
-                    iframe { width:100%; height:100%; border:none; }
+                    #player_container { width:100%; height:100%; border:none; }
                 </style>
             </head>
             <body>
-                <iframe id="yt_player"
-                    src="https://www.youtube-nocookie.com/embed/$videoId?autoplay=1&playsinline=1&enablejsapi=1&controls=0&rel=0&loop=$loopParam&playlist=$videoId"
-                    allow="autoplay; encrypted-media; picture-in-picture"
-                    allowfullscreen>
-                </iframe>
+                <div id="player_container"></div>
                 <script>
                     var tag = document.createElement('script');
                     tag.src = "https://www.youtube.com/iframe_api";
@@ -140,7 +109,17 @@ object YouTubeAudioEngine {
 
                     var player;
                     function onYouTubeIframeAPIReady() {
-                        player = new YT.Player('yt_player', {
+                        player = new YT.Player('player_container', {
+                            videoId: '$videoId',
+                            playerVars: {
+                                'autoplay': 1,
+                                'playsinline': 1,
+                                'controls': 0,
+                                'rel': 0,
+                                'modestbranding': 1,
+                                'loop': $loopParam,
+                                'playlist': '$videoId'
+                            },
                             events: {
                                 'onReady': onPlayerReady,
                                 'onError': onPlayerError

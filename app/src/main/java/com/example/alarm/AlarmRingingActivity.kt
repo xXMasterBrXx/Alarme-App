@@ -34,6 +34,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Alarm
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Headset
 import androidx.compose.material.icons.filled.Snooze
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -42,6 +43,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -108,11 +110,11 @@ class AlarmRingingActivity : ComponentActivity() {
                     mathMission = math,
                     snoozeMinutes = snoozeMins,
                     onDismissAlarm = {
-                        AlarmSoundPlayer.stop()
+                        AlarmSoundPlayer.stop(this)
                         finish()
                     },
                     onSnoozeAlarm = {
-                        AlarmSoundPlayer.stop()
+                        AlarmSoundPlayer.stop(this)
                         AlarmScheduler.scheduleSnooze(this, alarmId, label, sound, vibrate, math, snoozeMins, vibrationOnly, volume)
                         finish()
                     }
@@ -123,7 +125,7 @@ class AlarmRingingActivity : ComponentActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
-        AlarmSoundPlayer.stop()
+        AlarmSoundPlayer.stop(this)
     }
 }
 
@@ -189,6 +191,9 @@ fun AlarmRingingScreen(
             verticalArrangement = Arrangement.SpaceBetween
         ) {
             // Header: Clean title without time-of-day tags
+            val context = androidx.compose.ui.platform.LocalContext.current
+            val connectedDevices = remember { AudioRoutingManager.checkConnectedDevices(context) }
+
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 modifier = Modifier.padding(top = 24.dp)
@@ -207,6 +212,33 @@ fun AlarmRingingScreen(
                     color = MaterialTheme.colorScheme.onSurface,
                     textAlign = TextAlign.Center
                 )
+
+                if (connectedDevices.isExternalConnected && !vibrationOnly) {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Surface(
+                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.85f),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Headset,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Text(
+                                text = "Tocando no Fone (${connectedDevices.deviceNames.firstOrNull() ?: "Bluetooth"}) + Alto-falante",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer
+                            )
+                        }
+                    }
+                }
             }
 
             // Central Pulsating Clock

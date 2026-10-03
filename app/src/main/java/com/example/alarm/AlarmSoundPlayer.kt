@@ -44,6 +44,10 @@ object AlarmSoundPlayer {
         stop()
         isPlaying = true
 
+        // Configure dual audio routing (Forces internal speaker output alongside connected Bluetooth/Headsets)
+        AudioRoutingManager.configureDualAudioOutput(context)
+        val devicesInfo = AudioRoutingManager.checkConnectedDevices(context)
+
         // 1. Handle vibration
         if (shouldVibrate || vibrationOnly) {
             try {
@@ -78,6 +82,10 @@ object AlarmSoundPlayer {
             val parsed = YouTubeSoundService.parseSoundTone(soundTone)
             if (parsed != null) {
                 YouTubeAudioEngine.playAlarm(context, parsed.first, targetVolume)
+                if (devicesInfo.isExternalConnected) {
+                    // When Bluetooth/headsets are connected, also play a concurrent speaker alarm chime
+                    playSynthesizedTone(soundTone, loop = true, volume = targetVolume)
+                }
                 return
             }
         }
@@ -96,12 +104,7 @@ object AlarmSoundPlayer {
             try {
                 val mp = MediaPlayer().apply {
                     setDataSource(context, uri)
-                    setAudioAttributes(
-                        AudioAttributes.Builder()
-                            .setUsage(AudioAttributes.USAGE_ALARM)
-                            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                            .build()
-                    )
+                    setAudioAttributes(AudioRoutingManager.createDualOutputAudioAttributes())
                     setVolume(targetVolume, targetVolume)
                     isLooping = true
                     prepare()
@@ -127,6 +130,7 @@ object AlarmSoundPlayer {
         onFinished: () -> Unit = {}
     ) {
         stopPreview()
+        AudioRoutingManager.configureDualAudioOutput(context)
 
         val targetVolume = volume.coerceIn(0.05f, 1.0f)
 
@@ -156,10 +160,7 @@ object AlarmSoundPlayer {
                 if (uri != null) {
                     val ringtone = RingtoneManager.getRingtone(context, uri)
                     if (ringtone != null) {
-                        ringtone.audioAttributes = AudioAttributes.Builder()
-                            .setUsage(AudioAttributes.USAGE_ALARM)
-                            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                            .build()
+                        ringtone.audioAttributes = AudioRoutingManager.createDualOutputAudioAttributes()
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                             ringtone.volume = targetVolume
                         }
@@ -177,12 +178,7 @@ object AlarmSoundPlayer {
                 try {
                     val mp = MediaPlayer().apply {
                         setDataSource(context, uri)
-                        setAudioAttributes(
-                            AudioAttributes.Builder()
-                                .setUsage(AudioAttributes.USAGE_ALARM)
-                                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                                .build()
-                        )
+                        setAudioAttributes(AudioRoutingManager.createDualOutputAudioAttributes())
                         setVolume(targetVolume, targetVolume)
                         prepare()
                         start()
@@ -274,12 +270,7 @@ object AlarmSoundPlayer {
 
         try {
             val audioTrack = AudioTrack.Builder()
-                .setAudioAttributes(
-                    AudioAttributes.Builder()
-                        .setUsage(AudioAttributes.USAGE_ALARM)
-                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                        .build()
-                )
+                .setAudioAttributes(AudioRoutingManager.createDualOutputAudioAttributes())
                 .setAudioFormat(
                     AudioFormat.Builder()
                         .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
@@ -300,10 +291,11 @@ object AlarmSoundPlayer {
         }
     }
 
-    fun stop() {
+    fun stop(context: Context? = null) {
         isPlaying = false
         YouTubeAudioEngine.stopAlarm()
         stopPreview()
+        context?.let { AudioRoutingManager.restoreAudioRouting(it) }
         synthJob?.cancel()
         synthJob = null
 
