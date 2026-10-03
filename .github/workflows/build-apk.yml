@@ -33,10 +33,18 @@ jobs:
 
       - name: Prepare Debug Keystore and Environment
         run: |
-          # Generate debug.keystore if not present in checkout
+          # Use consistent debug.keystore from base64 if available
           if [ ! -f "debug.keystore" ]; then
-            echo "Generating debug.keystore..."
-            keytool -genkey -v -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+            if [ -f "debug.keystore.base64" ]; then
+              echo "Decoding debug.keystore.base64..."
+              base64 -d debug.keystore.base64 > debug.keystore
+            elif [ -n "${{ secrets.DEBUG_KEYSTORE_BASE64 }}" ]; then
+              echo "Decoding DEBUG_KEYSTORE_BASE64 secret..."
+              echo "${{ secrets.DEBUG_KEYSTORE_BASE64 }}" | base64 -d > debug.keystore
+            else
+              echo "Generating debug.keystore..."
+              keytool -genkey -v -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+            fi
           fi
           
           # Create empty .env if not present
