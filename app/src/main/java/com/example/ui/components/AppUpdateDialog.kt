@@ -199,6 +199,7 @@ fun AppUpdateDialog(
                             GitHubUpdateManager.downloadAndInstallApk(
                                 context = context,
                                 downloadUrl = releaseInfo.downloadUrl,
+                                releaseTag = releaseInfo.tagName,
                                 onProgress = { progress ->
                                     downloadProgress = progress
                                 },
@@ -280,7 +281,7 @@ fun UpdateSettingsCard(
                             style = MaterialTheme.typography.titleSmall
                         )
                         Text(
-                            text = "Versão instalada: v${BuildConfig.VERSION_NAME}",
+                            text = "Versão instalada: ${GitHubUpdateManager.getInstalledVersionDisplay(context)}",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )

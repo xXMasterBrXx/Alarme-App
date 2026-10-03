@@ -45,8 +45,10 @@ jobs:
           fi
 
       - name: Build APK
+        env:
+          VERSION_NAME: ${{ github.ref_name }}
         run: |
-          gradle :app:assembleDebug --no-daemon --stacktrace
+          gradle :app:assembleDebug -PversionName="${{ github.ref_name }}" --no-daemon --stacktrace
 
       - name: Prepare Release Artifacts
         run: |

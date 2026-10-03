@@ -141,9 +141,26 @@ object GitHubUpdateManager {
                 !normalizedRemote.equals(normalizedCurrent, ignoreCase = true)
     }
 
+    fun saveInstalledTag(context: Context, tag: String) {
+        if (tag.isBlank()) return
+        val prefs = context.getSharedPreferences("chrono_prefs", Context.MODE_PRIVATE)
+        prefs.edit().putString("installed_release_tag", tag.trim()).apply()
+    }
+
+    fun getInstalledVersionDisplay(context: Context): String {
+        val prefs = context.getSharedPreferences("chrono_prefs", Context.MODE_PRIVATE)
+        val savedTag = prefs.getString("installed_release_tag", null)
+        if (!savedTag.isNullOrBlank()) {
+            return savedTag
+        }
+        val ver = BuildConfig.VERSION_NAME.trim()
+        return if (ver.startsWith("v") || ver.startsWith("V")) ver else "v$ver"
+    }
+
     suspend fun downloadAndInstallApk(
         context: Context,
         downloadUrl: String,
+        releaseTag: String = "",
         onProgress: (Float) -> Unit,
         onError: (String) -> Unit
     ) = withContext(Dispatchers.IO) {
@@ -211,6 +228,9 @@ object GitHubUpdateManager {
 
             withContext(Dispatchers.Main) {
                 onProgress(1f)
+                if (releaseTag.isNotBlank()) {
+                    saveInstalledTag(context, releaseTag)
+                }
                 installApk(context, destinationFile, onError)
             }
         } catch (e: Exception) {
@@ -222,14 +242,26 @@ object GitHubUpdateManager {
 
     private fun installApk(context: Context, apkFile: File, onError: (String) -> Unit) {
         try {
+            if (!apkFile.exists() || apkFile.length() == 0L) {
+                onError("Arquivo APK baixado está corrompido ou em branco.")
+                return
+            }
+
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 val hasInstallPermission = context.packageManager.canRequestPackageInstalls()
                 if (!hasInstallPermission) {
+                    android.widget.Toast.makeText(
+                        context,
+                        "Ative a permissão 'Instalar apps desconhecidos' e toque em Atualizar novamente.",
+                        android.widget.Toast.LENGTH_LONG
+                    ).show()
+
                     val settingsIntent = Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES).apply {
                         data = Uri.parse("package:${context.packageName}")
                         flags = Intent.FLAG_ACTIVITY_NEW_TASK
                     }
                     context.startActivity(settingsIntent)
+                    return
                 }
             }
 
@@ -241,8 +273,26 @@ object GitHubUpdateManager {
 
             val installIntent = Intent(Intent.ACTION_VIEW).apply {
                 setDataAndType(contentUri, "application/vnd.android.package-archive")
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION
+                flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                        Intent.FLAG_GRANT_WRITE_URI_PERMISSION or
+                        Intent.FLAG_ACTIVITY_NEW_TASK or
+                        Intent.FLAG_ACTIVITY_CLEAR_TOP
+                putExtra(Intent.EXTRA_NOT_UNKNOWN_SOURCE, true)
             }
+
+            val resInfoList = context.packageManager.queryIntentActivities(
+                installIntent,
+                android.content.pm.PackageManager.MATCH_DEFAULT_ONLY
+            )
+            for (resolveInfo in resInfoList) {
+                val packageName = resolveInfo.activityInfo.packageName
+                context.grantUriPermission(
+                    packageName,
+                    contentUri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+            }
+
             context.startActivity(installIntent)
         } catch (e: Exception) {
             onError("Erro ao iniciar instalador: ${e.localizedMessage}")

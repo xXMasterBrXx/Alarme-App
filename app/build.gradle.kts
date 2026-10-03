@@ -12,12 +12,21 @@ android {
   namespace = "com.example"
   compileSdk { version = release(36) { minorApiLevel = 1 } }
 
+  val githubRunNumber = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 1
+  val calculatedVersionCode = 10000 + githubRunNumber
+
+  val envVersionName = System.getenv("VERSION_NAME")
+      ?: System.getenv("GITHUB_REF_NAME")?.removePrefix("v")?.removePrefix("V")
+      ?: project.findProperty("versionName")?.toString()
+      ?: "1.0.0"
+  val calculatedVersionName = envVersionName.ifBlank { "1.0.0" }
+
   defaultConfig {
     applicationId = "com.aistudio.chronoclock.qxrp"
     minSdk = 24
     targetSdk = 36
-    versionCode = 1
-    versionName = "1.0.0"
+    versionCode = calculatedVersionCode
+    versionName = calculatedVersionName
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
