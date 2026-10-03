@@ -28,22 +28,27 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Setup Gradle Cache
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.gradle/caches
-            ~/.gradle/wrapper
-          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
-          restore-keys: |
-            ${{ runner.os }}-gradle-
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
 
-      - name: Build APK (Release/Debug)
+      - name: Prepare Debug Keystore and Environment
         run: |
-          chmod +x ./gradlew || true
-          gradle assembleDebug --no-daemon
+          # Generate debug.keystore if not present in checkout
+          if [ ! -f "debug.keystore" ]; then
+            echo "Generating debug.keystore..."
+            keytool -genkey -v -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+          fi
+          
+          # Create empty .env if not present
+          if [ ! -f ".env" ]; then
+            touch .env
+          fi
 
-      - name: Rename APK for release
+      - name: Build APK
+        run: |
+          gradle :app:assembleDebug --no-daemon --stacktrace
+
+      - name: Prepare Release Artifacts
         run: |
           mkdir -p build/outputs/release-apk
           cp app/build/outputs/apk/debug/app-debug.apk build/outputs/release-apk/chronoclock-alarm.apk
