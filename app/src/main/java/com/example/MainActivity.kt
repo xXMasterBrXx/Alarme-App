@@ -178,10 +178,22 @@ fun MainAppContent(
     onStarShapeChange: (StarShape) -> Unit,
     onStarTwinkleToggle: (Boolean) -> Unit
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
     val atmosphere = LocalTimeAtmosphere.current
     val alarmViewModel: AlarmViewModel = viewModel()
     var selectedTab by rememberSaveable { mutableIntStateOf(0) }
     var showThemeSheet by remember { mutableStateOf(false) }
+    var availableRelease by remember { mutableStateOf<com.example.data.update.AppReleaseInfo?>(null) }
+
+    // Check for updates on startup
+    LaunchedEffect(Unit) {
+        val result = com.example.data.update.GitHubUpdateManager.checkForUpdates(context)
+        result.getOrNull()?.let { release ->
+            if (release.isNewer) {
+                availableRelease = release
+            }
+        }
+    }
 
     val tabs = remember {
         listOf(
@@ -307,7 +319,17 @@ fun MainAppContent(
             onStarTransparencyChange = onStarTransparencyChange,
             onStarShapeChange = onStarShapeChange,
             onStarTwinkleToggle = onStarTwinkleToggle,
+            onShowUpdateDialog = { release ->
+                availableRelease = release
+            },
             onDismiss = { showThemeSheet = false }
+        )
+    }
+
+    if (availableRelease != null) {
+        com.example.ui.components.AppUpdateDialog(
+            releaseInfo = availableRelease!!,
+            onDismiss = { availableRelease = null }
         )
     }
 }

@@ -55,6 +55,7 @@ fun ThemeSelectorSheet(
     onStarTransparencyChange: (Float) -> Unit,
     onStarShapeChange: (StarShape) -> Unit,
     onStarTwinkleToggle: (Boolean) -> Unit,
+    onShowUpdateDialog: (com.example.data.update.AppReleaseInfo) -> Unit = {},
     onDismiss: () -> Unit
 ) {
     ModalBottomSheet(
@@ -350,6 +351,16 @@ fun ThemeSelectorSheet(
                     }
                 }
             }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // ---- ATUALIZAÇÕES DO APP (GITHUB RELEASES) ----
+            UpdateSettingsCard(
+                onShowUpdateDialog = { release ->
+                    onDismiss()
+                    onShowUpdateDialog(release)
+                }
+            )
         }
     }
 }
