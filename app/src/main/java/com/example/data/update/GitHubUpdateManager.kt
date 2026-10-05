@@ -176,9 +176,8 @@ object GitHubUpdateManager {
         }
 
         try {
-            val downloadsDir = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
-                ?: context.cacheDir
-            val destinationFile = File(downloadsDir, "chronoclock-update.apk")
+            val updateDir = File(context.cacheDir, "updates").apply { mkdirs() }
+            val destinationFile = File(updateDir, "chronoclock-update.apk")
 
             if (destinationFile.exists()) {
                 destinationFile.delete()
@@ -187,8 +186,8 @@ object GitHubUpdateManager {
             val url = URL(downloadUrl)
             val conn = url.openConnection() as HttpURLConnection
             conn.instanceFollowRedirects = true
-            conn.connectTimeout = 10000
-            conn.readTimeout = 15000
+            conn.connectTimeout = 15000
+            conn.readTimeout = 30000
             conn.setRequestProperty("User-Agent", "ChronoClock-Updater")
 
             var redirectCount = 0
@@ -199,6 +198,13 @@ object GitHubUpdateManager {
                 finalConn = URL(newUrl).openConnection() as HttpURLConnection
                 finalConn.setRequestProperty("User-Agent", "ChronoClock-Updater")
                 redirectCount++
+            }
+
+            if (finalConn.responseCode != HttpURLConnection.HTTP_OK) {
+                withContext(Dispatchers.Main) {
+                    onError("Servidor retornou erro HTTP ${finalConn.responseCode} ao baixar o arquivo.")
+                }
+                return@withContext
             }
 
             val totalBytes = finalConn.contentLength.toLong()
@@ -222,6 +228,8 @@ object GitHubUpdateManager {
                 }
             }
 
+            destinationFile.setReadable(true, false)
+
             withContext(Dispatchers.Main) {
                 onProgress(1f)
                 installApk(context, destinationFile, onError)
@@ -235,8 +243,22 @@ object GitHubUpdateManager {
 
     private fun installApk(context: Context, apkFile: File, onError: (String) -> Unit) {
         try {
-            if (!apkFile.exists() || apkFile.length() == 0L) {
-                onError("Arquivo APK baixado está corrompido ou em branco.")
+            if (!apkFile.exists() || apkFile.length() < 1000L) {
+                onError("Arquivo APK baixado está corrompido ou incompleto.")
+                return
+            }
+
+            // Verify ZIP magic bytes
+            val isZip = try {
+                apkFile.inputStream().use { stream ->
+                    val header = ByteArray(4)
+                    val read = stream.read(header)
+                    read == 4 && header[0] == 0x50.toByte() && header[1] == 0x4B.toByte()
+                }
+            } catch (_: Exception) { false }
+
+            if (!isZip) {
+                onError("O arquivo baixado não é um APK válido.")
                 return
             }
 

@@ -24,7 +24,7 @@ android {
   defaultConfig {
     applicationId = "com.aistudio.chronoclock.qxrp"
     minSdk = 24
-    targetSdk = 36
+    targetSdk = 35
     versionCode = calculatedVersionCode
     versionName = calculatedVersionName
 
