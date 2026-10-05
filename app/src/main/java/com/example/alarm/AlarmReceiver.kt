@@ -38,46 +38,12 @@ class AlarmReceiver : BroadcastReceiver() {
             }
 
             AlarmScheduler.ACTION_ALARM_TRIGGER -> {
-                val alarmId = intent.getLongExtra(AlarmScheduler.EXTRA_ALARM_ID, 0L)
-                val label = intent.getStringExtra(AlarmScheduler.EXTRA_ALARM_LABEL) ?: "Alarme"
-                val sound = intent.getStringExtra(AlarmScheduler.EXTRA_ALARM_SOUND) ?: "gentle"
-                val vibrate = intent.getBooleanExtra(AlarmScheduler.EXTRA_ALARM_VIBRATE, true)
-                val vibrationOnly = intent.getBooleanExtra(AlarmScheduler.EXTRA_ALARM_VIBRATION_ONLY, false)
-                val math = intent.getBooleanExtra(AlarmScheduler.EXTRA_ALARM_MATH, false)
-                val snoozeMins = intent.getIntExtra(AlarmScheduler.EXTRA_ALARM_SNOOZE_MINS, 10)
-                val volume = intent.getFloatExtra(AlarmScheduler.EXTRA_ALARM_VOLUME, 0.8f)
-
-                // Start audio/vibration
-                AlarmSoundPlayer.play(context, sound, vibrate, vibrationOnly, volume)
-
-                // Launch Ringing Activity directly
-                val ringingIntent = Intent(context, AlarmRingingActivity::class.java).apply {
-                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_NO_USER_ACTION
-                    putExtra(AlarmScheduler.EXTRA_ALARM_ID, alarmId)
-                    putExtra(AlarmScheduler.EXTRA_ALARM_LABEL, label)
-                    putExtra(AlarmScheduler.EXTRA_ALARM_SOUND, sound)
-                    putExtra(AlarmScheduler.EXTRA_ALARM_VIBRATE, vibrate)
-                    putExtra(AlarmScheduler.EXTRA_ALARM_VIBRATION_ONLY, vibrationOnly)
-                    putExtra(AlarmScheduler.EXTRA_ALARM_MATH, math)
-                    putExtra(AlarmScheduler.EXTRA_ALARM_SNOOZE_MINS, snoozeMins)
-                    putExtra(AlarmScheduler.EXTRA_ALARM_VOLUME, volume)
-                }
-
-                // Show notification with full-screen intent
-                createNotificationChannel(context)
-                showAlarmNotification(context, ringingIntent, alarmId, label, sound, vibrate, math, snoozeMins)
-
-                // Also try launching activity
-                try {
-                    context.startActivity(ringingIntent)
-                } catch (_: Exception) {
-                }
+                AlarmService.startAlarm(context, intent)
             }
 
             AlarmScheduler.ACTION_ALARM_DISMISS -> {
                 val alarmId = intent.getLongExtra(AlarmScheduler.EXTRA_ALARM_ID, 0L)
-                AlarmSoundPlayer.stop()
-                cancelNotification(context)
+                AlarmService.stopAlarm(context)
 
                 // Disable if one-time alarm
                 if (alarmId > 0) {
@@ -101,8 +67,7 @@ class AlarmReceiver : BroadcastReceiver() {
                 val snoozeMins = intent.getIntExtra(AlarmScheduler.EXTRA_ALARM_SNOOZE_MINS, 10)
                 val volume = intent.getFloatExtra(AlarmScheduler.EXTRA_ALARM_VOLUME, 0.8f)
 
-                AlarmSoundPlayer.stop()
-                cancelNotification(context)
+                AlarmService.stopAlarm(context)
 
                 AlarmScheduler.scheduleSnooze(context, alarmId, label, sound, vibrate, math, snoozeMins, vibrationOnly, volume)
             }

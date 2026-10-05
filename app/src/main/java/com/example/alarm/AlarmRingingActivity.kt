@@ -82,15 +82,15 @@ class AlarmRingingActivity : ComponentActivity() {
             setTurnScreenOn(true)
             val keyguardManager = getSystemService(Context.KEYGUARD_SERVICE) as? KeyguardManager
             keyguardManager?.requestDismissKeyguard(this, null)
-        } else {
-            @Suppress("DEPRECATION")
-            window.addFlags(
-                WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
-                WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD or
-                WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
-                WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
-            )
         }
+        @Suppress("DEPRECATION")
+        window.addFlags(
+            WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+            WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD or
+            WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
+            WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
+            WindowManager.LayoutParams.FLAG_ALLOW_LOCK_WHILE_SCREEN_ON
+        )
 
         val alarmId = intent.getLongExtra(AlarmScheduler.EXTRA_ALARM_ID, 0L)
         val label = intent.getStringExtra(AlarmScheduler.EXTRA_ALARM_LABEL) ?: "Despertador"
@@ -110,11 +110,11 @@ class AlarmRingingActivity : ComponentActivity() {
                     mathMission = math,
                     snoozeMinutes = snoozeMins,
                     onDismissAlarm = {
-                        AlarmSoundPlayer.stop(this)
+                        AlarmService.stopAlarm(this)
                         finish()
                     },
                     onSnoozeAlarm = {
-                        AlarmSoundPlayer.stop(this)
+                        AlarmService.stopAlarm(this)
                         AlarmScheduler.scheduleSnooze(this, alarmId, label, sound, vibrate, math, snoozeMins, vibrationOnly, volume)
                         finish()
                     }
@@ -125,7 +125,7 @@ class AlarmRingingActivity : ComponentActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
-        AlarmSoundPlayer.stop(this)
+        AlarmService.stopAlarm(this)
     }
 }
 

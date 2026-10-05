@@ -29,47 +29,53 @@ class AlarmViewModel(application: Application) : AndroidViewModel(application) {
         )
 
     init {
-        // Pre-populate default sample alarms on first run if database is empty
+        // Pre-populate default sample alarms ONLY on the very first install run
         viewModelScope.launch {
-            val enabled = alarmDao.getEnabledAlarms()
-            if (enabled.isEmpty()) {
-                val sampleAlarms = listOf(
-                    AlarmEntity(
-                        hour = 7,
-                        minute = 0,
-                        label = "Despertar Matinal",
-                        isEnabled = true,
-                        daysOfWeek = "1,2,3,4,5", // Weekdays
-                        vibrate = true,
-                        soundTone = "default",
-                        snoozeMinutes = 10
-                    ),
-                    AlarmEntity(
-                        hour = 8,
-                        minute = 30,
-                        label = "Treino / Corrida",
-                        isEnabled = false,
-                        daysOfWeek = "6,7", // Weekend
-                        vibrate = true,
-                        vibrationOnly = true,
-                        soundTone = "default",
-                        snoozeMinutes = 5
-                    ),
-                    AlarmEntity(
-                        hour = 22,
-                        minute = 45,
-                        label = "Rotina Noturna & Sono",
-                        isEnabled = true,
-                        daysOfWeek = "1,2,3,4,5,6,7",
-                        vibrate = false,
-                        soundTone = "default",
-                        snoozeMinutes = 15
+            val prefs = getApplication<Application>().getSharedPreferences("chrono_prefs", Context.MODE_PRIVATE)
+            val alreadyInitialized = prefs.getBoolean("alarms_init_done", false)
+
+            if (!alreadyInitialized) {
+                prefs.edit().putBoolean("alarms_init_done", true).apply()
+                val totalCount = alarmDao.getAlarmCount()
+                if (totalCount == 0) {
+                    val sampleAlarms = listOf(
+                        AlarmEntity(
+                            hour = 7,
+                            minute = 0,
+                            label = "Despertar Matinal",
+                            isEnabled = true,
+                            daysOfWeek = "1,2,3,4,5", // Weekdays
+                            vibrate = true,
+                            soundTone = "default",
+                            snoozeMinutes = 10
+                        ),
+                        AlarmEntity(
+                            hour = 8,
+                            minute = 30,
+                            label = "Treino / Corrida",
+                            isEnabled = false,
+                            daysOfWeek = "6,7", // Weekend
+                            vibrate = true,
+                            vibrationOnly = true,
+                            soundTone = "default",
+                            snoozeMinutes = 5
+                        ),
+                        AlarmEntity(
+                            hour = 22,
+                            minute = 45,
+                            label = "Rotina Noturna & Sono",
+                            isEnabled = true,
+                            daysOfWeek = "1,2,3,4,5,6,7",
+                            vibrate = false,
+                            soundTone = "default",
+                            snoozeMinutes = 15
+                        )
                     )
-                )
-                for (a in sampleAlarms) {
-                    val id = alarmDao.insertAlarm(a)
-                    if (a.isEnabled) {
-                        AlarmScheduler.scheduleAlarm(application, a.copy(id = id))
+                    for (a in sampleAlarms) {
+                        val id = alarmDao.insertAlarm(a)
+                        if (a.isEnabled) {
+                            AlarmScheduler.scheduleAlarm(application, a.copy(id = id))
+                        }
                     }
                 }
             }
@@ -109,6 +115,8 @@ class AlarmViewModel(application: Application) : AndroidViewModel(application) {
 
     fun deleteAlarm(alarm: AlarmEntity) {
         viewModelScope.launch {
+            val prefs = getApplication<Application>().getSharedPreferences("chrono_prefs", Context.MODE_PRIVATE)
+            prefs.edit().putBoolean("alarms_init_done", true).apply()
             AlarmScheduler.cancelAlarm(getApplication(), alarm)
             alarmDao.deleteAlarm(alarm)
         }
