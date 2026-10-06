@@ -221,8 +221,11 @@ object GitHubUpdateManager {
         }
 
         try {
-            val updateDir = File(context.cacheDir, "updates").apply { mkdirs() }
-            val destinationFile = File(updateDir, "chronoclock-update.apk")
+            val downloadDir = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
+                ?: context.externalCacheDir
+                ?: File(context.cacheDir, "updates")
+            downloadDir.mkdirs()
+            val destinationFile = File(downloadDir, "chronoclock-update.apk")
 
             if (destinationFile.exists()) {
                 destinationFile.delete()
@@ -237,11 +240,17 @@ object GitHubUpdateManager {
 
             var redirectCount = 0
             var finalConn = conn
-            while (finalConn.responseCode in listOf(301, 302, 303, 307, 308) && redirectCount < 5) {
-                val newUrl = finalConn.getHeaderField("Location")
+            var currentUrl = downloadUrl
+            while (finalConn.responseCode in listOf(301, 302, 303, 307, 308) && redirectCount < 7) {
+                val location = finalConn.getHeaderField("Location")
                 finalConn.disconnect()
-                finalConn = URL(newUrl).openConnection() as HttpURLConnection
+                if (location.isNullOrBlank()) break
+                val targetUrl = URL(URL(currentUrl), location).toString()
+                currentUrl = targetUrl
+                finalConn = URL(targetUrl).openConnection() as HttpURLConnection
                 finalConn.setRequestProperty("User-Agent", "ChronoClock-Updater")
+                finalConn.connectTimeout = 15000
+                finalConn.readTimeout = 30000
                 redirectCount++
             }
 
@@ -274,6 +283,7 @@ object GitHubUpdateManager {
             }
 
             destinationFile.setReadable(true, false)
+            destinationFile.setWritable(true, false)
 
             withContext(Dispatchers.Main) {
                 onProgress(1f)
@@ -312,7 +322,7 @@ object GitHubUpdateManager {
                 if (!hasInstallPermission) {
                     android.widget.Toast.makeText(
                         context,
-                        "Ative a permissão 'Instalar apps desconhecidos' e toque em Atualizar novamente.",
+                        "Ative a permissão 'Instalar apps desconhecidos' para instalar a atualização.",
                         android.widget.Toast.LENGTH_LONG
                     ).show()
 
@@ -334,26 +344,53 @@ object GitHubUpdateManager {
             val installIntent = Intent(Intent.ACTION_VIEW).apply {
                 setDataAndType(contentUri, "application/vnd.android.package-archive")
                 flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or
-                        Intent.FLAG_GRANT_WRITE_URI_PERMISSION or
                         Intent.FLAG_ACTIVITY_NEW_TASK or
                         Intent.FLAG_ACTIVITY_CLEAR_TOP
                 putExtra(Intent.EXTRA_NOT_UNKNOWN_SOURCE, true)
             }
 
-            val resInfoList = context.packageManager.queryIntentActivities(
-                installIntent,
-                android.content.pm.PackageManager.MATCH_DEFAULT_ONLY
+            // Explicitly grant URI read permissions to system package installers
+            val knownInstallers = listOf(
+                "com.google.android.packageinstaller",
+                "com.android.packageinstaller",
+                "com.samsung.android.packageinstaller",
+                "com.miui.packageinstaller",
+                "com.coloros.packageinstaller",
+                "com.oppo.packageinstaller",
+                "com.vivo.packageinstaller",
+                "com.huawei.appmarket"
             )
-            for (resolveInfo in resInfoList) {
-                val packageName = resolveInfo.activityInfo.packageName
-                context.grantUriPermission(
-                    packageName,
-                    contentUri,
-                    Intent.FLAG_GRANT_READ_URI_PERMISSION
-                )
+            for (installerPkg in knownInstallers) {
+                try {
+                    context.grantUriPermission(installerPkg, contentUri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                } catch (_: Exception) {}
             }
 
-            context.startActivity(installIntent)
+            try {
+                val resInfoList = context.packageManager.queryIntentActivities(
+                    installIntent,
+                    0
+                )
+                for (resolveInfo in resInfoList) {
+                    val packageName = resolveInfo.activityInfo.packageName
+                    context.grantUriPermission(
+                        packageName,
+                        contentUri,
+                        Intent.FLAG_GRANT_READ_URI_PERMISSION
+                    )
+                }
+            } catch (_: Exception) {}
+
+            try {
+                context.startActivity(installIntent)
+            } catch (_: Exception) {
+                val fallbackIntent = Intent(Intent.ACTION_INSTALL_PACKAGE).apply {
+                    setDataAndType(contentUri, "application/vnd.android.package-archive")
+                    flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK
+                    putExtra(Intent.EXTRA_NOT_UNKNOWN_SOURCE, true)
+                }
+                context.startActivity(fallbackIntent)
+            }
         } catch (e: Exception) {
             onError("Erro ao iniciar instalador: ${e.localizedMessage}")
         }

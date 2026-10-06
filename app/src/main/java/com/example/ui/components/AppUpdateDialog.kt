@@ -202,6 +202,9 @@ fun AppUpdateDialog(
                                 releaseTag = releaseInfo.tagName,
                                 onProgress = { progress ->
                                     downloadProgress = progress
+                                    if (progress >= 1f) {
+                                        isDownloading = false
+                                    }
                                 },
                                 onError = { err ->
                                     isDownloading = false
