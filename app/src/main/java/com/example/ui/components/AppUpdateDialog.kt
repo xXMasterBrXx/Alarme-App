@@ -325,7 +325,13 @@ fun UpdateSettingsCard(
                                 result.fold(
                                     onSuccess = { release ->
                                         if (release != null) {
-                                            if (release.isNewer) {
+                                            val installed = GitHubUpdateManager.getInstalledVersionDisplay(context)
+                                                .removePrefix("v").removePrefix("V").trim()
+                                            val remote = release.tagName
+                                                .removePrefix("v").removePrefix("V").trim()
+                                            val isDifferent = !installed.equals(remote, ignoreCase = true)
+
+                                            if (release.isNewer || isDifferent) {
                                                 onShowUpdateDialog(release)
                                             } else {
                                                 Toast.makeText(

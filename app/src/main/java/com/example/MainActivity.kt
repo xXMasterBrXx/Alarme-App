@@ -189,7 +189,13 @@ fun MainAppContent(
     LaunchedEffect(Unit) {
         val result = com.example.data.update.GitHubUpdateManager.checkForUpdates(context)
         result.getOrNull()?.let { release ->
-            if (release.isNewer) {
+            val installed = com.example.data.update.GitHubUpdateManager.getInstalledVersionDisplay(context)
+                .removePrefix("v").removePrefix("V").trim()
+            val remote = release.tagName
+                .removePrefix("v").removePrefix("V").trim()
+            val isDifferent = !installed.equals(remote, ignoreCase = true)
+
+            if (release.isNewer || isDifferent) {
                 availableRelease = release
             }
         }

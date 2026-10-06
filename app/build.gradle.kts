@@ -18,8 +18,8 @@ android {
   val envVersionName = System.getenv("VERSION_NAME")
       ?: System.getenv("GITHUB_REF_NAME")?.removePrefix("v")?.removePrefix("V")
       ?: project.findProperty("versionName")?.toString()
-      ?: "1.0.0"
-  val calculatedVersionName = envVersionName.ifBlank { "1.0.0" }
+      ?: "0.1.0"
+  val calculatedVersionName = envVersionName.ifBlank { "0.1.0" }
 
   defaultConfig {
     applicationId = "com.aistudio.chronoclock.qxrp"

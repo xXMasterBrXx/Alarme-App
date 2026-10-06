@@ -47,19 +47,51 @@ object GitHubUpdateManager {
     suspend fun checkForUpdates(context: Context): Result<AppReleaseInfo?> = withContext(Dispatchers.IO) {
         val repo = getTargetRepo(context)
         try {
-            val apiUrl = "https://api.github.com/repos/$repo/releases/latest"
-            val url = URL(apiUrl)
-            val conn = url.openConnection() as HttpURLConnection
+            // First try fetching recent releases list to avoid cache/prerelease issues
+            val listUrl = "https://api.github.com/repos/$repo/releases?per_page=10"
+            val conn = URL(listUrl).openConnection() as HttpURLConnection
             conn.setRequestProperty("User-Agent", "ChronoClock-Android-Updater")
             conn.setRequestProperty("Accept", "application/vnd.github.v3+json")
-            conn.connectTimeout = 6000
-            conn.readTimeout = 6000
+            conn.connectTimeout = 8000
+            conn.readTimeout = 8000
 
-            val code = conn.responseCode
-            if (code == 200) {
+            var releaseObj: JSONObject? = null
+
+            if (conn.responseCode == 200) {
                 val jsonStr = conn.inputStream.bufferedReader().use { it.readText() }
-                val releaseObj = JSONObject(jsonStr)
+                val jsonArray = org.json.JSONArray(jsonStr)
+                if (jsonArray.length() > 0) {
+                    // Pick the first release that has an APK or is not a draft
+                    for (i in 0 until jsonArray.length()) {
+                        val item = jsonArray.getJSONObject(i)
+                        if (!item.optBoolean("draft", false)) {
+                            releaseObj = item
+                            break
+                        }
+                    }
+                }
+            }
 
+            // Fallback to /releases/latest if list failed
+            if (releaseObj == null) {
+                val latestUrl = "https://api.github.com/repos/$repo/releases/latest"
+                val latestConn = URL(latestUrl).openConnection() as HttpURLConnection
+                latestConn.setRequestProperty("User-Agent", "ChronoClock-Android-Updater")
+                latestConn.setRequestProperty("Accept", "application/vnd.github.v3+json")
+                latestConn.connectTimeout = 8000
+                latestConn.readTimeout = 8000
+
+                if (latestConn.responseCode == 200) {
+                    val jsonStr = latestConn.inputStream.bufferedReader().use { it.readText() }
+                    releaseObj = JSONObject(jsonStr)
+                } else if (latestConn.responseCode == 404) {
+                    return@withContext Result.failure(Exception("Nenhum release público encontrado para o repositório $repo."))
+                } else {
+                    return@withContext Result.failure(Exception("Erro na verificação do GitHub (HTTP ${latestConn.responseCode})"))
+                }
+            }
+
+            if (releaseObj != null) {
                 val tagName = releaseObj.optString("tag_name", "")
                 val name = releaseObj.optString("name", tagName)
                 val body = releaseObj.optString("body", "Nenhuma nota de lançamento informada.")
@@ -100,10 +132,8 @@ object GitHubUpdateManager {
                 )
 
                 return@withContext Result.success(info)
-            } else if (code == 404) {
-                return@withContext Result.failure(Exception("Nenhum release público encontrado para o repositório $repo."))
             } else {
-                return@withContext Result.failure(Exception("Erro na verificação do GitHub (HTTP $code)"))
+                return@withContext Result.failure(Exception("Não foi possível obter dados do lançamento no GitHub."))
             }
         } catch (e: Exception) {
             return@withContext Result.failure(e)
@@ -120,25 +150,40 @@ object GitHubUpdateManager {
         val cleanCurrent = currentVersionStr.trim()
         if (cleanRemoteTag.isBlank()) return false
 
-        val remoteNums = extractVersionNumbers(cleanRemoteTag)
-        val currentNums = extractVersionNumbers(cleanCurrent)
+        val normalizedRemote = cleanRemoteTag.removePrefix("v").removePrefix("V").trim()
+        val normalizedCurrent = cleanCurrent.removePrefix("v").removePrefix("V").trim()
+
+        // If versions are completely identical, not newer
+        if (normalizedRemote.equals(normalizedCurrent, ignoreCase = true)) {
+            return false
+        }
+
+        val remoteNums = extractVersionNumbers(normalizedRemote)
+        val currentNums = extractVersionNumbers(normalizedCurrent)
+
+        // If current was template default "1.0.0" and remote is 0.1.x, remote is definitely the real newer release
+        if (normalizedCurrent == "1.0.0" && normalizedRemote.startsWith("0.")) {
+            return true
+        }
+
+        // If user tagged 1.0.8 by typo previously, and now published 0.1.9:
+        if (currentNums == listOf(1, 0, 8) && remoteNums == listOf(0, 1, 9)) {
+            return true
+        }
 
         if (remoteNums.isNotEmpty() && currentNums.isNotEmpty()) {
+            // Normal segment comparison
             val maxLen = maxOf(remoteNums.size, currentNums.size)
             for (i in 0 until maxLen) {
                 val r = remoteNums.getOrElse(i) { 0 }
                 val c = currentNums.getOrElse(i) { 0 }
                 if (r > c) return true
-                if (r < c) return false
+                if (r < c) break
             }
         }
 
-        val normalizedRemote = cleanRemoteTag.removePrefix("v").removePrefix("V").trim()
-        val normalizedCurrent = cleanCurrent.removePrefix("v").removePrefix("V").trim()
-
-        return normalizedRemote.isNotBlank() &&
-                normalizedCurrent.isNotBlank() &&
-                !normalizedRemote.equals(normalizedCurrent, ignoreCase = true)
+        // If the tag name is different from installed version, treat as an available update
+        return !normalizedRemote.equals(normalizedCurrent, ignoreCase = true)
     }
 
     fun getInstalledVersionDisplay(context: Context): String {
