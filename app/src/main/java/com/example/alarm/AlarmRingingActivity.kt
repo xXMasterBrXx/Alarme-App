@@ -80,8 +80,6 @@ class AlarmRingingActivity : ComponentActivity() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
             setShowWhenLocked(true)
             setTurnScreenOn(true)
-            val keyguardManager = getSystemService(Context.KEYGUARD_SERVICE) as? KeyguardManager
-            keyguardManager?.requestDismissKeyguard(this, null)
         }
         @Suppress("DEPRECATION")
         window.addFlags(
@@ -110,11 +108,15 @@ class AlarmRingingActivity : ComponentActivity() {
                     mathMission = math,
                     snoozeMinutes = snoozeMins,
                     onDismissAlarm = {
+                        AlarmSoundPlayer.stop(this)
                         AlarmService.stopAlarm(this)
+                        AlarmOverlayManager.dismissOverlay()
                         finish()
                     },
                     onSnoozeAlarm = {
+                        AlarmSoundPlayer.stop(this)
                         AlarmService.stopAlarm(this)
+                        AlarmOverlayManager.dismissOverlay()
                         AlarmScheduler.scheduleSnooze(this, alarmId, label, sound, vibrate, math, snoozeMins, vibrationOnly, volume)
                         finish()
                     }
@@ -125,7 +127,7 @@ class AlarmRingingActivity : ComponentActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
-        AlarmService.stopAlarm(this)
+        // Do not stop alarm here; only stop when user taps Dismiss or Snooze.
     }
 }
 

@@ -8,6 +8,7 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.media.AudioAttributes
 import android.media.RingtoneManager
 import android.os.Build
@@ -31,10 +32,16 @@ class AlarmService : Service() {
                 action = ACTION_START_ALARM
                 putExtras(intent)
             }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(serviceIntent)
-            } else {
-                context.startService(serviceIntent)
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    context.startForegroundService(serviceIntent)
+                } else {
+                    context.startService(serviceIntent)
+                }
+            } catch (_: Exception) {
+                try {
+                    context.startService(serviceIntent)
+                } catch (_: Exception) {}
             }
         }
 
@@ -158,7 +165,20 @@ class AlarmService : Service() {
                 .addAction(android.R.drawable.ic_popup_sync, "Soneca (${snoozeMins}m)", snoozePendingIntent)
                 .build()
 
-            startForeground(NOTIFICATION_ID, notification)
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
+                } else {
+                    startForeground(NOTIFICATION_ID, notification)
+                }
+            } catch (e: Exception) {
+                try {
+                    startForeground(NOTIFICATION_ID, notification)
+                } catch (e2: Exception) {
+                    val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                    nm.notify(NOTIFICATION_ID, notification)
+                }
+            }
 
             // Show floating popup if overlay permission is granted
             AlarmOverlayManager.showOverlay(
@@ -176,6 +196,9 @@ class AlarmService : Service() {
             try {
                 startActivity(ringingIntent, activityOptionsBundle)
             } catch (_: Exception) {
+                try {
+                    startActivity(ringingIntent)
+                } catch (_: Exception) {}
             }
         }
 
@@ -214,16 +237,9 @@ class AlarmService : Service() {
             val channel = NotificationChannel(CHANNEL_ID, name, importance).apply {
                 description = descriptionText
                 enableVibration(true)
-                vibrationPattern = longArrayOf(0, 500, 200, 500)
+                setSound(null, null) // Continuous sound and vibration are driven by AlarmSoundPlayer
                 lockscreenVisibility = NotificationCompat.VISIBILITY_PUBLIC
                 setBypassDnd(true)
-                val defaultRingtoneUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
-                    ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
-                val audioAttrs = AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_ALARM)
-                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                    .build()
-                setSound(defaultRingtoneUri, audioAttrs)
             }
             val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             notificationManager.createNotificationChannel(channel)
@@ -239,7 +255,7 @@ class AlarmService : Service() {
     }
 
     override fun onDestroy() {
-        stopAlarmInternal()
+        releaseWakeLock()
         super.onDestroy()
     }
 }

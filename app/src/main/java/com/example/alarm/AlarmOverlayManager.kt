@@ -1,6 +1,7 @@
 package com.example.alarm
 
 import android.annotation.SuppressLint
+import android.app.NotificationManager
 import android.content.Context
 import android.content.Intent
 import android.graphics.PixelFormat
@@ -65,8 +66,13 @@ object AlarmOverlayManager {
                     y = 50
                 }
 
+                val themedContext = android.view.ContextThemeWrapper(
+                    context,
+                    android.R.style.Theme_DeviceDefault_Dialog
+                )
+
                 // Create programmatically styled floating card
-                val card = android.widget.LinearLayout(context).apply {
+                val card = android.widget.LinearLayout(themedContext).apply {
                     orientation = android.widget.LinearLayout.VERTICAL
                     setPadding(48, 40, 48, 40)
                     val bg = android.graphics.drawable.GradientDrawable().apply {
@@ -78,20 +84,20 @@ object AlarmOverlayManager {
                     elevation = 24f
                 }
 
-                val titleRow = android.widget.LinearLayout(context).apply {
+                val titleRow = android.widget.LinearLayout(themedContext).apply {
                     orientation = android.widget.LinearLayout.HORIZONTAL
                     gravity = Gravity.CENTER_VERTICAL
                 }
 
                 val timeStr = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
-                val timeTv = TextView(context).apply {
+                val timeTv = TextView(themedContext).apply {
                     text = timeStr
                     textSize = 28f
                     setTextColor(0xFFFFFFFF.toInt())
                     setTypeface(null, android.graphics.Typeface.BOLD)
                 }
 
-                val labelTv = TextView(context).apply {
+                val labelTv = TextView(themedContext).apply {
                     text = "  ⏰ $label"
                     textSize = 18f
                     setTextColor(0xFF818CF8.toInt())
@@ -102,7 +108,7 @@ object AlarmOverlayManager {
                 titleRow.addView(labelTv)
                 card.addView(titleRow)
 
-                val subTv = TextView(context).apply {
+                val subTv = TextView(themedContext).apply {
                     text = if (math) "Desafio de matemática ativo! Toque para resolver." else "Alarme tocando"
                     textSize = 14f
                     setTextColor(0xFFCCCCCC.toInt())
@@ -111,23 +117,26 @@ object AlarmOverlayManager {
                 card.addView(subTv)
 
                 // Buttons row
-                val btnRow = android.widget.LinearLayout(context).apply {
+                val btnRow = android.widget.LinearLayout(themedContext).apply {
                     orientation = android.widget.LinearLayout.HORIZONTAL
                     gravity = Gravity.END
                 }
 
-                val snoozeBtn = Button(context).apply {
+                val snoozeBtn = Button(themedContext).apply {
                     text = "Soneca (${snoozeMinutes}m)"
                     setTextColor(0xFF818CF8.toInt())
                     setBackgroundColor(android.graphics.Color.TRANSPARENT)
                     setOnClickListener {
                         dismissOverlay()
+                        AlarmSoundPlayer.stop(context)
                         AlarmService.stopAlarm(context)
+                        val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+                        nm?.cancel(AlarmReceiver.NOTIFICATION_ID)
                         AlarmScheduler.scheduleSnooze(context, alarmId, label, sound, vibrate, math, snoozeMinutes, false, volume)
                     }
                 }
 
-                val actionBtn = Button(context).apply {
+                val actionBtn = Button(themedContext).apply {
                     text = if (math) "Abrir Missão" else "Desligar"
                     setTextColor(0xFFFFFFFF.toInt())
                     val btnBg = android.graphics.drawable.GradientDrawable().apply {
@@ -150,7 +159,10 @@ object AlarmOverlayManager {
                             }
                             context.startActivity(openIntent)
                         } else {
+                            AlarmSoundPlayer.stop(context)
                             AlarmService.stopAlarm(context)
+                            val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+                            nm?.cancel(AlarmReceiver.NOTIFICATION_ID)
                         }
                     }
                 }

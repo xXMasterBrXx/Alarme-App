@@ -38,12 +38,75 @@ class AlarmReceiver : BroadcastReceiver() {
             }
 
             AlarmScheduler.ACTION_ALARM_TRIGGER -> {
+                val alarmId = intent.getLongExtra(AlarmScheduler.EXTRA_ALARM_ID, 0L)
+                val label = intent.getStringExtra(AlarmScheduler.EXTRA_ALARM_LABEL) ?: "Alarme"
+                val sound = intent.getStringExtra(AlarmScheduler.EXTRA_ALARM_SOUND) ?: "gentle"
+                val vibrate = intent.getBooleanExtra(AlarmScheduler.EXTRA_ALARM_VIBRATE, true)
+                val vibrationOnly = intent.getBooleanExtra(AlarmScheduler.EXTRA_ALARM_VIBRATION_ONLY, false)
+                val math = intent.getBooleanExtra(AlarmScheduler.EXTRA_ALARM_MATH, false)
+                val snoozeMins = intent.getIntExtra(AlarmScheduler.EXTRA_ALARM_SNOOZE_MINS, 10)
+                val volume = intent.getFloatExtra(AlarmScheduler.EXTRA_ALARM_VOLUME, 0.8f)
+
+                // 1. Play continuous sound & vibration immediately
+                AlarmSoundPlayer.play(context, sound, vibrate, vibrationOnly, volume)
+
+                // 2. Prepare Intent to launch AlarmRingingActivity
+                val ringingIntent = Intent(context, AlarmRingingActivity::class.java).apply {
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                            Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                            Intent.FLAG_ACTIVITY_SINGLE_TOP or
+                            Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
+                    putExtra(AlarmScheduler.EXTRA_ALARM_ID, alarmId)
+                    putExtra(AlarmScheduler.EXTRA_ALARM_LABEL, label)
+                    putExtra(AlarmScheduler.EXTRA_ALARM_SOUND, sound)
+                    putExtra(AlarmScheduler.EXTRA_ALARM_VIBRATE, vibrate)
+                    putExtra(AlarmScheduler.EXTRA_ALARM_VIBRATION_ONLY, vibrationOnly)
+                    putExtra(AlarmScheduler.EXTRA_ALARM_MATH, math)
+                    putExtra(AlarmScheduler.EXTRA_ALARM_SNOOZE_MINS, snoozeMins)
+                    putExtra(AlarmScheduler.EXTRA_ALARM_VOLUME, volume)
+                }
+
+                // 3. Post full-screen alarm notification
+                showAlarmNotification(
+                    context = context,
+                    ringingIntent = ringingIntent,
+                    alarmId = alarmId,
+                    label = label,
+                    sound = sound,
+                    vibrate = vibrate,
+                    vibrationOnly = vibrationOnly,
+                    math = math,
+                    snoozeMins = snoozeMins,
+                    volume = volume
+                )
+
+                // 4. Show floating popup card if overlay permission is granted
+                AlarmOverlayManager.showOverlay(
+                    context = context,
+                    alarmId = alarmId,
+                    label = label,
+                    sound = sound,
+                    vibrate = vibrate,
+                    math = math,
+                    snoozeMinutes = snoozeMins,
+                    volume = volume
+                )
+
+                // 5. Directly launch the full-screen ringing activity
+                try {
+                    context.startActivity(ringingIntent)
+                } catch (_: Exception) {}
+
+                // 6. Start AlarmService for ongoing foreground persistence
                 AlarmService.startAlarm(context, intent)
             }
 
             AlarmScheduler.ACTION_ALARM_DISMISS -> {
                 val alarmId = intent.getLongExtra(AlarmScheduler.EXTRA_ALARM_ID, 0L)
+                AlarmSoundPlayer.stop(context)
                 AlarmService.stopAlarm(context)
+                AlarmOverlayManager.dismissOverlay()
+                cancelNotification(context)
 
                 // Disable if one-time alarm
                 if (alarmId > 0) {
@@ -67,7 +130,10 @@ class AlarmReceiver : BroadcastReceiver() {
                 val snoozeMins = intent.getIntExtra(AlarmScheduler.EXTRA_ALARM_SNOOZE_MINS, 10)
                 val volume = intent.getFloatExtra(AlarmScheduler.EXTRA_ALARM_VOLUME, 0.8f)
 
+                AlarmSoundPlayer.stop(context)
                 AlarmService.stopAlarm(context)
+                AlarmOverlayManager.dismissOverlay()
+                cancelNotification(context)
 
                 AlarmScheduler.scheduleSnooze(context, alarmId, label, sound, vibrate, math, snoozeMins, vibrationOnly, volume)
             }
@@ -77,13 +143,14 @@ class AlarmReceiver : BroadcastReceiver() {
     private fun createNotificationChannel(context: Context) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val name = "Alarmes Chrono"
-            val descriptionText = "Notificações de disparo de alarme em tela cheia"
+            val descriptionText = "Notificações de disparo de alarme em tela cheia e popup"
             val importance = NotificationManager.IMPORTANCE_HIGH
             val channel = NotificationChannel(CHANNEL_ID, name, importance).apply {
                 description = descriptionText
                 enableVibration(true)
-                setSound(null, null) // Audio handled by AlarmSoundPlayer
+                setSound(null, null) // Audio and vibration handled by AlarmSoundPlayer
                 lockscreenVisibility = NotificationCompat.VISIBILITY_PUBLIC
+                setBypassDnd(true)
             }
             val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             notificationManager.createNotificationChannel(channel)
@@ -97,14 +164,30 @@ class AlarmReceiver : BroadcastReceiver() {
         label: String,
         sound: String,
         vibrate: Boolean,
+        vibrationOnly: Boolean,
         math: Boolean,
-        snoozeMins: Int
+        snoozeMins: Int,
+        volume: Float
     ) {
+        createNotificationChannel(context)
+
+        val activityOptionsBundle = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            android.app.ActivityOptions.makeBasic().apply {
+                @Suppress("DEPRECATION")
+                setPendingIntentBackgroundActivityStartMode(
+                    android.app.ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED
+                )
+            }.toBundle()
+        } else {
+            android.app.ActivityOptions.makeBasic().toBundle()
+        }
+
         val fullScreenPendingIntent = PendingIntent.getActivity(
             context,
             alarmId.toInt(),
             ringingIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            activityOptionsBundle
         )
 
         // Dismiss action intent
@@ -126,8 +209,10 @@ class AlarmReceiver : BroadcastReceiver() {
             putExtra(AlarmScheduler.EXTRA_ALARM_LABEL, label)
             putExtra(AlarmScheduler.EXTRA_ALARM_SOUND, sound)
             putExtra(AlarmScheduler.EXTRA_ALARM_VIBRATE, vibrate)
+            putExtra(AlarmScheduler.EXTRA_ALARM_VIBRATION_ONLY, vibrationOnly)
             putExtra(AlarmScheduler.EXTRA_ALARM_MATH, math)
             putExtra(AlarmScheduler.EXTRA_ALARM_SNOOZE_MINS, snoozeMins)
+            putExtra(AlarmScheduler.EXTRA_ALARM_VOLUME, volume)
         }
         val snoozePendingIntent = PendingIntent.getBroadcast(
             context,
@@ -139,7 +224,7 @@ class AlarmReceiver : BroadcastReceiver() {
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
             .setContentTitle("⏰ $label")
-            .setContentText("Alarme disparando! Toque para abrir.")
+            .setContentText("Alarme disparando! Toque para interagir.")
             .setPriority(NotificationCompat.PRIORITY_MAX)
             .setCategory(NotificationCompat.CATEGORY_ALARM)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
