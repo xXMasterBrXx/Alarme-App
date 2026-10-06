@@ -1,5 +1,6 @@
 package com.example.alarm
 
+import android.app.ActivityOptions
 import android.app.KeyguardManager
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -8,9 +9,11 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.media.AudioAttributes
+import android.media.RingtoneManager
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
+import android.provider.Settings
 import androidx.core.app.NotificationCompat
 import com.example.MainActivity
 
@@ -92,11 +95,23 @@ class AlarmService : Service() {
                 putExtra(AlarmScheduler.EXTRA_ALARM_VOLUME, volume)
             }
 
+            // Prepare background activity launch options (Required on Android 14+ / 15)
+            val activityOptionsBundle = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                ActivityOptions.makeBasic().apply {
+                    setPendingIntentBackgroundActivityStartMode(
+                        ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED
+                    )
+                }.toBundle()
+            } else {
+                ActivityOptions.makeBasic().toBundle()
+            }
+
             val fullScreenPendingIntent = PendingIntent.getActivity(
                 this,
                 alarmId.toInt(),
                 ringingIntent,
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+                activityOptionsBundle
             )
 
             // Dismiss intent
@@ -145,9 +160,21 @@ class AlarmService : Service() {
 
             startForeground(NOTIFICATION_ID, notification)
 
-            // Launch AlarmRingingActivity directly
+            // Show floating popup if overlay permission is granted
+            AlarmOverlayManager.showOverlay(
+                context = this,
+                alarmId = alarmId,
+                label = label,
+                sound = sound,
+                vibrate = vibrate,
+                math = math,
+                snoozeMinutes = snoozeMins,
+                volume = volume
+            )
+
+            // Launch AlarmRingingActivity directly with background start options
             try {
-                startActivity(ringingIntent)
+                startActivity(ringingIntent, activityOptionsBundle)
             } catch (_: Exception) {
             }
         }
@@ -187,13 +214,16 @@ class AlarmService : Service() {
             val channel = NotificationChannel(CHANNEL_ID, name, importance).apply {
                 description = descriptionText
                 enableVibration(true)
-                setSound(null, null) // Sound is played by AlarmSoundPlayer
+                vibrationPattern = longArrayOf(0, 500, 200, 500)
                 lockscreenVisibility = NotificationCompat.VISIBILITY_PUBLIC
+                setBypassDnd(true)
+                val defaultRingtoneUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
+                    ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
                 val audioAttrs = AudioAttributes.Builder()
                     .setUsage(AudioAttributes.USAGE_ALARM)
                     .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
                     .build()
-                setSound(null, audioAttrs)
+                setSound(defaultRingtoneUri, audioAttrs)
             }
             val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             notificationManager.createNotificationChannel(channel)
@@ -202,6 +232,7 @@ class AlarmService : Service() {
 
     private fun stopAlarmInternal() {
         AlarmSoundPlayer.stop()
+        AlarmOverlayManager.dismissOverlay()
         releaseWakeLock()
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()

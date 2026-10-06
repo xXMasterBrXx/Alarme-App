@@ -35,6 +35,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Event
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
@@ -95,6 +96,7 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -111,6 +113,7 @@ import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
 import java.util.Locale
+import java.util.TimeZone
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -141,6 +144,9 @@ fun EditAlarmSheet(
     var previewingTone by remember { mutableStateOf<String?>(null) }
     var showSoundsDialog by remember { mutableStateOf(false) }
     var showDatePickerDialog by remember { mutableStateOf(false) }
+    var showManualTimeInput by remember { mutableStateOf(false) }
+    var manualHourText by remember { mutableStateOf("") }
+    var manualMinuteText by remember { mutableStateOf("") }
 
     // Sounds dialog internal state
     var selectedSoundTab by remember { mutableIntStateOf(if (soundTone.startsWith("youtube://")) 1 else 0) }
@@ -224,67 +230,192 @@ fun EditAlarmSheet(
                 shape = RoundedCornerShape(24.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 20.dp, horizontal = 16.dp),
-                    horizontalArrangement = Arrangement.Center,
-                    verticalAlignment = Alignment.CenterVertically
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    // Hours column
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        IconButton(
-                            onClick = { hour = (hour + 1) % 24 },
-                            modifier = Modifier.testTag("increment_hour_button")
-                        ) {
-                            Icon(Icons.Default.KeyboardArrowUp, contentDescription = "Aumentar hora", tint = MaterialTheme.colorScheme.primary)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 16.dp, bottom = 8.dp, start = 16.dp, end = 16.dp),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // Hours column
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            IconButton(
+                                onClick = { hour = (hour + 1) % 24 },
+                                modifier = Modifier.testTag("increment_hour_button")
+                            ) {
+                                Icon(Icons.Default.KeyboardArrowUp, contentDescription = "Aumentar hora", tint = MaterialTheme.colorScheme.primary)
+                            }
+                            Text(
+                                text = String.format("%02d", hour),
+                                fontSize = 54.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier
+                                    .testTag("alarm_hour_text")
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .clickable {
+                                        manualHourText = String.format("%02d", hour)
+                                        manualMinuteText = String.format("%02d", minute)
+                                        showManualTimeInput = true
+                                    }
+                            )
+                            IconButton(
+                                onClick = { hour = if (hour - 1 < 0) 23 else hour - 1 },
+                                modifier = Modifier.testTag("decrement_hour_button")
+                            ) {
+                                Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Diminuir hora", tint = MaterialTheme.colorScheme.primary)
+                            }
                         }
+
                         Text(
-                            text = String.format("%02d", hour),
-                            fontSize = 54.sp,
+                            text = ":",
+                            fontSize = 50.sp,
                             fontWeight = FontWeight.ExtraBold,
-                            color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.testTag("alarm_hour_text")
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 16.dp)
                         )
-                        IconButton(
-                            onClick = { hour = if (hour - 1 < 0) 23 else hour - 1 },
-                            modifier = Modifier.testTag("decrement_hour_button")
-                        ) {
-                            Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Diminuir hora", tint = MaterialTheme.colorScheme.primary)
+
+                        // Minutes column (1-minute steps)
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            IconButton(
+                                onClick = { minute = (minute + 1) % 60 },
+                                modifier = Modifier.testTag("increment_minute_button")
+                            ) {
+                                Icon(Icons.Default.KeyboardArrowUp, contentDescription = "Aumentar 1 minuto", tint = MaterialTheme.colorScheme.primary)
+                            }
+                            Text(
+                                text = String.format("%02d", minute),
+                                fontSize = 54.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier
+                                    .testTag("alarm_minute_text")
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .clickable {
+                                        manualHourText = String.format("%02d", hour)
+                                        manualMinuteText = String.format("%02d", minute)
+                                        showManualTimeInput = true
+                                    }
+                            )
+                            IconButton(
+                                onClick = { minute = if (minute - 1 < 0) 59 else minute - 1 },
+                                modifier = Modifier.testTag("decrement_minute_button")
+                            ) {
+                                Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Diminuir 1 minuto", tint = MaterialTheme.colorScheme.primary)
+                            }
                         }
                     }
 
-                    Text(
-                        text = ":",
-                        fontSize = 50.sp,
-                        fontWeight = FontWeight.ExtraBold,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(horizontal = 16.dp)
-                    )
-
-                    // Minutes column
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        IconButton(
-                            onClick = { minute = (minute + 5) % 60 },
-                            modifier = Modifier.testTag("increment_minute_button")
-                        ) {
-                            Icon(Icons.Default.KeyboardArrowUp, contentDescription = "Aumentar minuto", tint = MaterialTheme.colorScheme.primary)
-                        }
-                        Text(
-                            text = String.format("%02d", minute),
-                            fontSize = 54.sp,
-                            fontWeight = FontWeight.ExtraBold,
-                            color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.testTag("alarm_minute_text")
+                    // Quick minute chips & manual input button
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 12.dp, start = 8.dp, end = 8.dp),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        SuggestionChip(
+                            onClick = { minute = if (minute - 5 < 0) minute + 55 else minute - 5 },
+                            label = { Text("-5m", fontSize = 12.sp) }
                         )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        SuggestionChip(
+                            onClick = { minute = if (minute - 1 < 0) 59 else minute - 1 },
+                            label = { Text("-1m", fontSize = 12.sp) }
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        SuggestionChip(
+                            onClick = { minute = (minute + 1) % 60 },
+                            label = { Text("+1m", fontSize = 12.sp) }
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        SuggestionChip(
+                            onClick = { minute = (minute + 5) % 60 },
+                            label = { Text("+5m", fontSize = 12.sp) }
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
                         IconButton(
-                            onClick = { minute = if (minute - 5 < 0) 55 else minute - 5 },
-                            modifier = Modifier.testTag("decrement_minute_button")
+                            onClick = {
+                                manualHourText = String.format("%02d", hour)
+                                manualMinuteText = String.format("%02d", minute)
+                                showManualTimeInput = true
+                            },
+                            modifier = Modifier.size(36.dp)
                         ) {
-                            Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Diminuir minuto", tint = MaterialTheme.colorScheme.primary)
+                            Icon(
+                                imageVector = Icons.Default.Edit,
+                                contentDescription = "Digitar horário exato",
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(18.dp)
+                            )
                         }
                     }
                 }
+            }
+
+            if (showManualTimeInput) {
+                AlertDialog(
+                    onDismissRequest = { showManualTimeInput = false },
+                    title = { Text("Definir Horário Exato") },
+                    text = {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            OutlinedTextField(
+                                value = manualHourText,
+                                onValueChange = { input ->
+                                    val filtered = input.filter { it.isDigit() }.take(2)
+                                    manualHourText = filtered
+                                },
+                                label = { Text("Hora (0-23)") },
+                                modifier = Modifier.width(105.dp),
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                singleLine = true
+                            )
+                            Text(
+                                text = ":",
+                                fontSize = 28.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 8.dp)
+                            )
+                            OutlinedTextField(
+                                value = manualMinuteText,
+                                onValueChange = { input ->
+                                    val filtered = input.filter { it.isDigit() }.take(2)
+                                    manualMinuteText = filtered
+                                },
+                                label = { Text("Minuto (0-59)") },
+                                modifier = Modifier.width(105.dp),
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                singleLine = true
+                            )
+                        }
+                    },
+                    confirmButton = {
+                        Button(
+                            onClick = {
+                                val h = manualHourText.toIntOrNull() ?: hour
+                                val m = manualMinuteText.toIntOrNull() ?: minute
+                                hour = h.coerceIn(0, 23)
+                                minute = m.coerceIn(0, 59)
+                                showManualTimeInput = false
+                            }
+                        ) {
+                            Text("Confirmar")
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showManualTimeInput = false }) {
+                            Text("Cancelar")
+                        }
+                    }
+                )
             }
 
             Spacer(modifier = Modifier.height(18.dp))
@@ -782,12 +913,24 @@ fun EditAlarmSheet(
 
     // Material 3 Date Picker Dialog
     if (showDatePickerDialog) {
-        val initialDate = specificDateMillis ?: run {
-            val cal = Calendar.getInstance()
-            cal.timeInMillis
+        val initialUtcDate = remember(specificDateMillis) {
+            val localCal = Calendar.getInstance().apply {
+                if (specificDateMillis != null) {
+                    timeInMillis = specificDateMillis!!
+                }
+            }
+            val utcCal = Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply {
+                clear()
+                set(
+                    localCal.get(Calendar.YEAR),
+                    localCal.get(Calendar.MONTH),
+                    localCal.get(Calendar.DAY_OF_MONTH)
+                )
+            }
+            utcCal.timeInMillis
         }
         val datePickerState = rememberDatePickerState(
-            initialSelectedDateMillis = initialDate
+            initialSelectedDateMillis = initialUtcDate
         )
 
         DatePickerDialog(
@@ -795,8 +938,24 @@ fun EditAlarmSheet(
             confirmButton = {
                 TextButton(
                     onClick = {
-                        datePickerState.selectedDateMillis?.let { pickedMillis ->
-                            specificDateMillis = pickedMillis
+                        datePickerState.selectedDateMillis?.let { utcMillis ->
+                            val utcCal = Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply {
+                                timeInMillis = utcMillis
+                            }
+                            val year = utcCal.get(Calendar.YEAR)
+                            val month = utcCal.get(Calendar.MONTH)
+                            val day = utcCal.get(Calendar.DAY_OF_MONTH)
+
+                            val localCal = Calendar.getInstance().apply {
+                                set(Calendar.YEAR, year)
+                                set(Calendar.MONTH, month)
+                                set(Calendar.DAY_OF_MONTH, day)
+                                set(Calendar.HOUR_OF_DAY, 0)
+                                set(Calendar.MINUTE, 0)
+                                set(Calendar.SECOND, 0)
+                                set(Calendar.MILLISECOND, 0)
+                            }
+                            specificDateMillis = localCal.timeInMillis
                             selectedDays.clear() // Mutually exclusive with recurring weekly days
                         }
                         showDatePickerDialog = false
