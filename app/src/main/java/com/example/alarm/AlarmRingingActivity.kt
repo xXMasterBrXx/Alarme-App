@@ -1,9 +1,11 @@
 package com.example.alarm
 
 import android.app.KeyguardManager
+import android.app.NotificationManager
 import android.content.Context
 import android.os.Build
 import android.os.Bundle
+import android.os.PowerManager
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -72,6 +74,8 @@ import kotlin.random.Random
 
 class AlarmRingingActivity : ComponentActivity() {
 
+    private var activityWakeLock: PowerManager.WakeLock? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -90,14 +94,29 @@ class AlarmRingingActivity : ComponentActivity() {
             WindowManager.LayoutParams.FLAG_ALLOW_LOCK_WHILE_SCREEN_ON
         )
 
+        try {
+            val pm = getSystemService(Context.POWER_SERVICE) as? PowerManager
+            @Suppress("DEPRECATION")
+            activityWakeLock = pm?.newWakeLock(
+                PowerManager.SCREEN_BRIGHT_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP,
+                "Chrono:AlarmRingingActivityWakeLock"
+            )
+            activityWakeLock?.acquire(10 * 60 * 1000L)
+        } catch (_: Exception) {}
+
         val alarmId = intent.getLongExtra(AlarmScheduler.EXTRA_ALARM_ID, 0L)
         val label = intent.getStringExtra(AlarmScheduler.EXTRA_ALARM_LABEL) ?: "Despertador"
-        val sound = intent.getStringExtra(AlarmScheduler.EXTRA_ALARM_SOUND) ?: "gentle"
+        val sound = intent.getStringExtra(AlarmScheduler.EXTRA_ALARM_SOUND) ?: "default"
         val vibrate = intent.getBooleanExtra(AlarmScheduler.EXTRA_ALARM_VIBRATE, true)
         val vibrationOnly = intent.getBooleanExtra(AlarmScheduler.EXTRA_ALARM_VIBRATION_ONLY, false)
         val math = intent.getBooleanExtra(AlarmScheduler.EXTRA_ALARM_MATH, false)
         val snoozeMins = intent.getIntExtra(AlarmScheduler.EXTRA_ALARM_SNOOZE_MINS, 10)
         val volume = intent.getFloatExtra(AlarmScheduler.EXTRA_ALARM_VOLUME, 0.8f)
+
+        // Ensure audio & vibration are playing
+        if (!AlarmSoundPlayer.isPlaying) {
+            AlarmSoundPlayer.play(this, sound, vibrate, vibrationOnly, volume)
+        }
 
         setContent {
             ChronoDynamicTheme {
@@ -111,12 +130,16 @@ class AlarmRingingActivity : ComponentActivity() {
                         AlarmSoundPlayer.stop(this)
                         AlarmService.stopAlarm(this)
                         AlarmOverlayManager.dismissOverlay()
+                        val nm = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+                        nm?.cancel(AlarmReceiver.NOTIFICATION_ID)
                         finish()
                     },
                     onSnoozeAlarm = {
                         AlarmSoundPlayer.stop(this)
                         AlarmService.stopAlarm(this)
                         AlarmOverlayManager.dismissOverlay()
+                        val nm = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+                        nm?.cancel(AlarmReceiver.NOTIFICATION_ID)
                         AlarmScheduler.scheduleSnooze(this, alarmId, label, sound, vibrate, math, snoozeMins, vibrationOnly, volume)
                         finish()
                     }
@@ -126,8 +149,13 @@ class AlarmRingingActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        try {
+            if (activityWakeLock?.isHeld == true) {
+                activityWakeLock?.release()
+            }
+            activityWakeLock = null
+        } catch (_: Exception) {}
         super.onDestroy()
-        // Do not stop alarm here; only stop when user taps Dismiss or Snooze.
     }
 }
 
@@ -192,110 +220,116 @@ fun AlarmRingingScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.SpaceBetween
         ) {
-            // Header: Clean title without time-of-day tags
+            // Header
             val context = androidx.compose.ui.platform.LocalContext.current
             val connectedDevices = remember { AudioRoutingManager.checkConnectedDevices(context) }
 
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier.padding(top = 24.dp)
+                modifier = Modifier.padding(top = 16.dp)
             ) {
-                Text(
-                    text = if (vibrationOnly) "📳 Apenas Vibração" else "⏰ Despertador",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = atmosphere.glowColor
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(
-                    text = label,
-                    style = MaterialTheme.typography.headlineMedium,
-                    fontWeight = FontWeight.ExtraBold,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    textAlign = TextAlign.Center
-                )
-
-                if (connectedDevices.isExternalConnected && !vibrationOnly) {
-                    Spacer(modifier = Modifier.height(10.dp))
+                if (connectedDevices.isExternalConnected) {
                     Surface(
+                        shape = RoundedCornerShape(16.dp),
                         color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.85f),
-                        shape = RoundedCornerShape(12.dp)
+                        modifier = Modifier.padding(bottom = 12.dp)
                     ) {
                         Row(
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
                             verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
                             horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
                             Icon(
-                                imageVector = Icons.Default.Headset,
+                                Icons.Default.Headset,
                                 contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
+                                tint = MaterialTheme.colorScheme.onPrimaryContainer,
                                 modifier = Modifier.size(16.dp)
                             )
                             Text(
-                                text = "Tocando no Fone (${connectedDevices.deviceNames.firstOrNull() ?: "Bluetooth"}) + Alto-falante",
+                                text = "Áudio duplo: Auto-falante + ${connectedDevices.deviceNames.firstOrNull() ?: "Fones"}",
                                 style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer
+                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                fontWeight = FontWeight.Bold
                             )
                         }
                     }
                 }
+
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.headlineMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    textAlign = TextAlign.Center
+                )
+                Text(
+                    text = dateFormat.format(currentTime).replaceFirstChar { it.uppercase() },
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
 
-            // Central Pulsating Clock
+            // Pulsing Alarm Clock Center Element
             Box(
                 contentAlignment = Alignment.Center,
-                modifier = Modifier.size(280.dp)
+                modifier = Modifier.padding(vertical = 24.dp)
             ) {
-                // Pulsing outer aura
+                // Background Glowing Rings
                 Box(
                     modifier = Modifier
                         .size(240.dp)
                         .scale(pulseScale)
                         .clip(CircleShape)
-                        .background(atmosphere.glowColor.copy(alpha = 0.15f))
-                        .border(2.dp, atmosphere.glowColor.copy(alpha = 0.4f), CircleShape)
+                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f))
                 )
-
-                // Inner circle
                 Box(
                     modifier = Modifier
-                        .size(200.dp)
+                        .size(190.dp)
+                        .scale(pulseScale * 0.96f)
                         .clip(CircleShape)
-                        .background(atmosphere.cardGradient)
-                        .border(2.dp, atmosphere.glowColor, CircleShape),
-                    contentAlignment = Alignment.Center
+                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.25f))
+                )
+
+                // Foreground Clock Card
+                Card(
+                    shape = CircleShape,
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f)),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 16.dp),
+                    modifier = Modifier
+                        .size(160.dp)
+                        .border(3.dp, MaterialTheme.colorScheme.primary, CircleShape)
                 ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Column(
+                        modifier = Modifier.fillMaxSize(),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
                         Icon(
-                            imageVector = Icons.Default.Alarm,
+                            Icons.Default.Alarm,
                             contentDescription = null,
-                            tint = atmosphere.glowColor,
-                            modifier = Modifier.size(40.dp)
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(36.dp)
                         )
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
                             text = timeFormat.format(currentTime),
-                            fontSize = 48.sp,
+                            fontSize = 34.sp,
                             fontWeight = FontWeight.ExtraBold,
                             color = MaterialTheme.colorScheme.onSurface
-                        )
-                        Text(
-                            text = dateFormat.format(currentTime),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }
             }
 
-            // Math Mission or Standard Dismiss
+            // Middle: Math Challenge if enabled
             if (mathMission && !challengeSolved) {
                 Card(
-                    modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(24.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.95f)),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("math_challenge_card")
                 ) {
                     Column(
                         modifier = Modifier.padding(20.dp),

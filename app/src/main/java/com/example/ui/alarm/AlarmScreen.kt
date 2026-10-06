@@ -400,16 +400,37 @@ fun AlarmScreen(
                                     }
                                 }
 
-                                IconButton(
-                                    onClick = { alarmToDelete = alarm },
-                                    modifier = Modifier.size(32.dp)
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
                                 ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Delete,
-                                        contentDescription = "Excluir alarme",
-                                        tint = MaterialTheme.colorScheme.outline.copy(alpha = 0.7f),
-                                        modifier = Modifier.size(18.dp)
-                                    )
+                                    IconButton(
+                                        onClick = {
+                                            com.example.alarm.AlarmScheduler.triggerAlarmImmediately(context, alarm)
+                                        },
+                                        modifier = Modifier
+                                            .size(32.dp)
+                                            .testTag("test_alarm_${alarm.id}")
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.PlayArrow,
+                                            contentDescription = "Testar alarme agora",
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                    }
+
+                                    IconButton(
+                                        onClick = { alarmToDelete = alarm },
+                                        modifier = Modifier.size(32.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Delete,
+                                            contentDescription = "Excluir alarme",
+                                            tint = MaterialTheme.colorScheme.outline.copy(alpha = 0.7f),
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
                                 }
                             }
                         }

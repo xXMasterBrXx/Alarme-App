@@ -56,7 +56,6 @@ object AlarmScheduler {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        // Show Intent when user taps alarm icon in lockscreen/status bar
         val showIntent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
         }
@@ -68,28 +67,51 @@ object AlarmScheduler {
         )
 
         try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                if (alarmManager.canScheduleExactAlarms()) {
-                    alarmManager.setAlarmClock(
-                        AlarmManager.AlarmClockInfo(triggerTime, showPendingIntent),
+            // setAlarmClock is the highest priority alarm clock trigger on Android.
+            // It runs even under strict Battery Optimization / Doze mode and shows next alarm time on system lockscreen.
+            alarmManager.setAlarmClock(
+                AlarmManager.AlarmClockInfo(triggerTime, showPendingIntent),
+                pendingIntent
+            )
+        } catch (_: Exception) {
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    alarmManager.setExactAndAllowWhileIdle(
+                        AlarmManager.RTC_WAKEUP,
+                        triggerTime,
                         pendingIntent
                     )
                 } else {
-                    alarmManager.setAndAllowWhileIdle(
+                    alarmManager.setExact(
                         AlarmManager.RTC_WAKEUP,
                         triggerTime,
                         pendingIntent
                     )
                 }
-            } else {
-                alarmManager.setAlarmClock(
-                    AlarmManager.AlarmClockInfo(triggerTime, showPendingIntent),
-                    pendingIntent
-                )
+            } catch (_: Exception) {
+                alarmManager.set(AlarmManager.RTC_WAKEUP, triggerTime, pendingIntent)
             }
-        } catch (_: SecurityException) {
-            alarmManager.set(AlarmManager.RTC_WAKEUP, triggerTime, pendingIntent)
         }
+    }
+
+    /**
+     * Immediately triggers the alarm for instant testing by the user from the UI.
+     */
+    fun triggerAlarmImmediately(context: Context, alarm: AlarmEntity) {
+        val intent = Intent(context, AlarmReceiver::class.java).apply {
+            action = ACTION_ALARM_TRIGGER
+            putExtra(EXTRA_ALARM_ID, alarm.id)
+            putExtra(EXTRA_ALARM_LABEL, "${alarm.label} (Teste)")
+            putExtra(EXTRA_ALARM_HOUR, alarm.hour)
+            putExtra(EXTRA_ALARM_MINUTE, alarm.minute)
+            putExtra(EXTRA_ALARM_SOUND, alarm.soundTone)
+            putExtra(EXTRA_ALARM_VIBRATE, alarm.vibrate)
+            putExtra(EXTRA_ALARM_VIBRATION_ONLY, alarm.vibrationOnly)
+            putExtra(EXTRA_ALARM_MATH, alarm.mathMission)
+            putExtra(EXTRA_ALARM_SNOOZE_MINS, alarm.snoozeMinutes)
+            putExtra(EXTRA_ALARM_VOLUME, alarm.volume)
+        }
+        context.sendBroadcast(intent)
     }
 
     fun scheduleSnooze(
@@ -136,27 +158,28 @@ object AlarmScheduler {
         )
 
         try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                if (alarmManager.canScheduleExactAlarms()) {
-                    alarmManager.setAlarmClock(
-                        AlarmManager.AlarmClockInfo(triggerTime, showPendingIntent),
+            alarmManager.setAlarmClock(
+                AlarmManager.AlarmClockInfo(triggerTime, showPendingIntent),
+                pendingIntent
+            )
+        } catch (_: Exception) {
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    alarmManager.setExactAndAllowWhileIdle(
+                        AlarmManager.RTC_WAKEUP,
+                        triggerTime,
                         pendingIntent
                     )
                 } else {
-                    alarmManager.setAndAllowWhileIdle(
+                    alarmManager.setExact(
                         AlarmManager.RTC_WAKEUP,
                         triggerTime,
                         pendingIntent
                     )
                 }
-            } else {
-                alarmManager.setAlarmClock(
-                    AlarmManager.AlarmClockInfo(triggerTime, showPendingIntent),
-                    pendingIntent
-                )
+            } catch (_: Exception) {
+                alarmManager.set(AlarmManager.RTC_WAKEUP, triggerTime, pendingIntent)
             }
-        } catch (_: SecurityException) {
-            alarmManager.set(AlarmManager.RTC_WAKEUP, triggerTime, pendingIntent)
         }
     }
 
@@ -178,6 +201,8 @@ object AlarmScheduler {
     }
 
     fun calculateNextTriggerTime(hour: Int, minute: Int, daysOfWeek: List<Int>, specificDateMillis: Long? = null): Long {
+        val now = Calendar.getInstance()
+
         if (specificDateMillis != null) {
             val dateCal = Calendar.getInstance().apply {
                 timeInMillis = specificDateMillis
@@ -191,10 +216,13 @@ object AlarmScheduler {
                 set(Calendar.SECOND, 0)
                 set(Calendar.MILLISECOND, 0)
             }
+            if (target.timeInMillis <= now.timeInMillis) {
+                // If specific date selected is today and time has already passed, schedule immediately (+2s) or next minute
+                return now.timeInMillis + 2000L
+            }
             return target.timeInMillis
         }
 
-        val now = Calendar.getInstance()
         val target = Calendar.getInstance().apply {
             set(Calendar.HOUR_OF_DAY, hour)
             set(Calendar.MINUTE, minute)
@@ -211,7 +239,6 @@ object AlarmScheduler {
         }
 
         // Repeating alarm: ISO days: 1=Monday, 2=Tuesday, ..., 7=Sunday
-        // Calendar day: Sunday=1, Monday=2, Tuesday=3, Wednesday=4, Thursday=5, Friday=6, Saturday=7
         for (dayOffset in 0..7) {
             val candidate = (target.clone() as Calendar).apply {
                 add(Calendar.DAY_OF_YEAR, dayOffset)

@@ -3,16 +3,17 @@ package com.example.alarm
 import android.content.Context
 import android.media.AudioAttributes
 import android.media.AudioFormat
+import android.media.AudioManager
 import android.media.AudioTrack
 import android.media.MediaPlayer
 import android.media.Ringtone
 import android.media.RingtoneManager
 import android.net.Uri
 import android.os.Build
-import android.provider.Settings
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
+import android.provider.Settings
 import com.example.data.youtube.YouTubeAudioEngine
 import com.example.data.youtube.YouTubeSoundService
 import kotlinx.coroutines.CoroutineScope
@@ -21,7 +22,6 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import kotlin.math.PI
 import kotlin.math.sin
 
@@ -36,7 +36,9 @@ object AlarmSoundPlayer {
     private var synthJob: Job? = null
     private var streamingAudioTrack: AudioTrack? = null
     private var previewJob: Job? = null
-    private var isPlaying = false
+    @Volatile
+    var isPlaying = false
+        private set
 
     fun play(
         context: Context,
@@ -46,21 +48,19 @@ object AlarmSoundPlayer {
         volume: Float = 0.8f
     ) {
         if (isPlaying) {
-            // Already actively ringing for this alarm event, do not cancel or interrupt
             return
         }
         stop()
         isPlaying = true
 
         AudioRoutingManager.configureDualAudioOutput(context)
-        val devicesInfo = AudioRoutingManager.checkConnectedDevices(context)
 
         val alarmAudioAttrs = AudioAttributes.Builder()
             .setUsage(AudioAttributes.USAGE_ALARM)
             .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
             .build()
 
-        // 1. Handle vibration with USAGE_ALARM so it loops and bypasses silent mode
+        // 1. Continuous repeating vibration
         if (shouldVibrate || vibrationOnly) {
             try {
                 vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -71,7 +71,7 @@ object AlarmSoundPlayer {
                     context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
                 }
 
-                val pattern = longArrayOf(0, 600, 400, 600, 400)
+                val pattern = longArrayOf(0, 800, 400, 800, 400)
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                     vibrator?.vibrate(VibrationEffect.createWaveform(pattern, 0), alarmAudioAttrs)
                 } else {
@@ -82,26 +82,23 @@ object AlarmSoundPlayer {
             }
         }
 
-        // 2. Play audio (skip if vibration-only mode is active)
+        // 2. Play Audio if not vibration-only or silent
         if (vibrationOnly || soundTone == "silent") {
             return
         }
 
-        val targetVolume = volume.coerceIn(0.05f, 1.0f)
+        val targetVolume = volume.coerceIn(0.1f, 1.0f)
 
-        // YouTube sound playback via official embedded HTML5 audio engine
+        // YouTube audio playback
         if (soundTone.startsWith("youtube://")) {
             val parsed = YouTubeSoundService.parseSoundTone(soundTone)
             if (parsed != null) {
                 YouTubeAudioEngine.playAlarm(context, parsed.first, targetVolume)
-                if (devicesInfo.isExternalConnected) {
-                    playSynthesizedTone(soundTone, loop = true, volume = targetVolume)
-                }
                 return
             }
         }
 
-        // Resolve phone ringtone URI
+        // Resolve URI
         val uri: Uri? = if (soundTone.startsWith("content://") || soundTone.startsWith("android.resource://")) {
             Uri.parse(soundTone)
         } else {
@@ -113,7 +110,26 @@ object AlarmSoundPlayer {
 
         var played = false
 
+        // Primary: MediaPlayer on USAGE_ALARM / STREAM_ALARM with isLooping = true
         if (uri != null) {
+            try {
+                val mp = MediaPlayer().apply {
+                    setDataSource(context, uri)
+                    setAudioAttributes(alarmAudioAttrs)
+                    setVolume(targetVolume, targetVolume)
+                    isLooping = true
+                    prepare()
+                    start()
+                }
+                mediaPlayer = mp
+                played = true
+            } catch (_: Exception) {
+                played = false
+            }
+        }
+
+        // Secondary fallback: RingtoneManager
+        if (!played && uri != null) {
             try {
                 val ringtone = RingtoneManager.getRingtone(context, uri)
                 if (ringtone != null) {
@@ -126,7 +142,6 @@ object AlarmSoundPlayer {
                     activeRingtone = ringtone
                     played = true
 
-                    // Loop runner in case device doesn't loop Ringtone automatically
                     ringtoneLoopJob?.cancel()
                     ringtoneLoopJob = CoroutineScope(Dispatchers.Main).launch {
                         while (isActive && isPlaying) {
@@ -143,29 +158,11 @@ object AlarmSoundPlayer {
             } catch (_: Exception) {
                 played = false
             }
-
-            // Fallback to MediaPlayer if Ringtone failed
-            if (!played) {
-                try {
-                    val mp = MediaPlayer().apply {
-                        setDataSource(context, uri)
-                        setAudioAttributes(alarmAudioAttrs)
-                        setVolume(targetVolume, targetVolume)
-                        isLooping = true
-                        prepare()
-                        start()
-                    }
-                    mediaPlayer = mp
-                    played = true
-                } catch (_: Exception) {
-                    played = false
-                }
-            }
         }
 
-        // Fallback to synthesized melody if MediaPlayer & Ringtone both fail
+        // Final fallback: Synthesized alarm chime stream (Guaranteed to work without files or permissions)
         if (!played) {
-            playSynthesizedTone(soundTone, loop = true, volume = targetVolume)
+            playSynthesizedTone(loop = true, volume = targetVolume)
         }
     }
 
@@ -178,13 +175,12 @@ object AlarmSoundPlayer {
         stopPreview()
         AudioRoutingManager.configureDualAudioOutput(context)
 
-        val targetVolume = volume.coerceIn(0.05f, 1.0f)
+        val targetVolume = volume.coerceIn(0.1f, 1.0f)
 
-        // YouTube preview via official embedded HTML5 audio engine
         if (uriString.startsWith("youtube://")) {
             val parsed = YouTubeSoundService.parseSoundTone(uriString)
             if (parsed != null) {
-                YouTubeAudioEngine.playPreview(context, parsed.first, targetVolume, durationSeconds = 12) {
+                YouTubeAudioEngine.playPreview(context, parsed.first, targetVolume, durationSeconds = 10) {
                     onFinished()
                 }
                 return
@@ -201,26 +197,7 @@ object AlarmSoundPlayer {
         previewJob = CoroutineScope(Dispatchers.Main).launch {
             var isAudioPlaying = false
 
-            // Try RingtoneManager first
-            try {
-                if (uri != null) {
-                    val ringtone = RingtoneManager.getRingtone(context, uri)
-                    if (ringtone != null) {
-                        ringtone.audioAttributes = AudioRoutingManager.createDualOutputAudioAttributes()
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                            ringtone.volume = targetVolume
-                        }
-                        ringtone.play()
-                        previewRingtone = ringtone
-                        isAudioPlaying = true
-                    }
-                }
-            } catch (_: Exception) {
-                isAudioPlaying = false
-            }
-
-            // Fallback to MediaPlayer
-            if (!isAudioPlaying && uri != null) {
+            if (uri != null) {
                 try {
                     val mp = MediaPlayer().apply {
                         setDataSource(context, uri)
@@ -236,16 +213,28 @@ object AlarmSoundPlayer {
                 }
             }
 
-            // Fallback to synth if device has no media audio available
-            if (!isAudioPlaying) {
-                withContext(Dispatchers.Default) {
-                    playSynthesizedTone(uriString, loop = false, volume = targetVolume)
+            if (!isAudioPlaying && uri != null) {
+                try {
+                    val ringtone = RingtoneManager.getRingtone(context, uri)
+                    if (ringtone != null) {
+                        ringtone.audioAttributes = AudioRoutingManager.createDualOutputAudioAttributes()
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                            ringtone.volume = targetVolume
+                        }
+                        ringtone.play()
+                        previewRingtone = ringtone
+                        isAudioPlaying = true
+                    }
+                } catch (_: Exception) {
+                    isAudioPlaying = false
                 }
             }
 
-            // Let preview play for 3.5 seconds
-            delay(3500L)
+            if (!isAudioPlaying) {
+                playSynthesizedTone(loop = false, volume = targetVolume)
+            }
 
+            delay(3500L)
             stopPreview()
             onFinished()
         }
@@ -280,11 +269,11 @@ object AlarmSoundPlayer {
         }
     }
 
-    private fun playSynthesizedTone(toneType: String, loop: Boolean, volume: Float = 0.8f) {
+    private fun playSynthesizedTone(loop: Boolean, volume: Float = 0.8f) {
         synthJob?.cancel()
         synthJob = CoroutineScope(Dispatchers.Default).launch {
             val sampleRate = 22050
-            val frequencies = listOf(523.25, 659.25, 783.99, 1046.50) // C5, E5, G5, C6 (Major chime)
+            val frequencies = listOf(587.33, 739.99, 880.00, 1174.66) // D5, F#5, A5, D6 joyful alarm chord
             val minBuf = AudioTrack.getMinBufferSize(
                 sampleRate,
                 AudioFormat.CHANNEL_OUT_MONO,
@@ -317,7 +306,7 @@ object AlarmSoundPlayer {
                 do {
                     for (freq in frequencies) {
                         if (!isActive || (!isPlaying && !loop)) break
-                        val durationMs = 220
+                        val durationMs = 200
                         val numSamples = (durationMs * sampleRate) / 1000
                         val buffer = ShortArray(numSamples)
                         for (i in 0 until numSamples) {
@@ -327,12 +316,12 @@ object AlarmSoundPlayer {
                                 i > numSamples * 0.8 -> (numSamples - i).toDouble() / (numSamples * 0.2)
                                 else -> 1.0
                             }
-                            buffer[i] = (dVal * envelope * 24000 * gain).toInt().toShort()
+                            buffer[i] = (dVal * envelope * 28000 * gain).toInt().toShort()
                         }
                         track.write(buffer, 0, buffer.size)
-                        delay(60L)
+                        delay(50L)
                     }
-                    delay(400L)
+                    delay(350L)
                 } while (isActive && (isPlaying || loop))
             } catch (_: Exception) {
             } finally {

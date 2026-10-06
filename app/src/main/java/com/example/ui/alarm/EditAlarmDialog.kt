@@ -863,7 +863,38 @@ fun EditAlarmSheet(
                 }
             }
 
-            Spacer(modifier = Modifier.height(24.dp))
+            // Test Trigger Button
+            OutlinedButton(
+                onClick = {
+                    val daysString = if (specificDateMillis == null) selectedDays.sorted().joinToString(",") else ""
+                    val tempAlarm = (alarm ?: AlarmEntity(hour = hour, minute = minute)).copy(
+                        hour = hour,
+                        minute = minute,
+                        label = label.ifBlank { "Alarme" },
+                        daysOfWeek = daysString,
+                        vibrate = vibrate || vibrationOnly,
+                        vibrationOnly = vibrationOnly,
+                        soundTone = soundTone,
+                        snoozeMinutes = snoozeMinutes,
+                        mathMission = mathMission,
+                        volume = volume,
+                        specificDateMillis = specificDateMillis,
+                        isEnabled = true
+                    )
+                    com.example.alarm.AlarmScheduler.triggerAlarmImmediately(context, tempAlarm)
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp)
+                    .testTag("test_trigger_full_button"),
+                shape = RoundedCornerShape(16.dp)
+            ) {
+                Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(20.dp))
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Testar Disparo Completo Agora", fontWeight = FontWeight.SemiBold)
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
 
             // Actions
             Row(

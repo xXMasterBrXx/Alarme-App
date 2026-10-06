@@ -117,7 +117,11 @@ class MainActivity : ComponentActivity() {
                 mutableStateOf(prefs.getBoolean("star_twinkle", true))
             }
 
-            // Notification permission launcher for Android 13+
+            // Notification permission launcher for Android 13+ and Channel initialization
+            LaunchedEffect(Unit) {
+                com.example.alarm.AlarmReceiver.createAlarmNotificationChannel(context)
+            }
+
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 val notificationPermissionLauncher = rememberLauncherForActivityResult(
                     contract = ActivityResultContracts.RequestPermission()
