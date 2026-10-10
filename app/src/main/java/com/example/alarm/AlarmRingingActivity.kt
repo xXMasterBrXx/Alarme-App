@@ -102,7 +102,7 @@ class AlarmRingingActivity : ComponentActivity() {
                 "Chrono:AlarmRingingActivityWakeLock"
             )
             activityWakeLock?.acquire(10 * 60 * 1000L)
-        } catch (_: Exception) {}
+        } catch (_: Throwable) {}
 
         val alarmId = intent.getLongExtra(AlarmScheduler.EXTRA_ALARM_ID, 0L)
         val label = intent.getStringExtra(AlarmScheduler.EXTRA_ALARM_LABEL) ?: "Despertador"
@@ -114,9 +114,11 @@ class AlarmRingingActivity : ComponentActivity() {
         val volume = intent.getFloatExtra(AlarmScheduler.EXTRA_ALARM_VOLUME, 0.8f)
 
         // Ensure audio & vibration are playing
-        if (!AlarmSoundPlayer.isPlaying) {
-            AlarmSoundPlayer.play(this, sound, vibrate, vibrationOnly, volume)
-        }
+        try {
+            if (!AlarmSoundPlayer.isPlaying) {
+                AlarmSoundPlayer.play(this, sound, vibrate, vibrationOnly, volume)
+            }
+        } catch (_: Throwable) {}
 
         setContent {
             ChronoDynamicTheme {
@@ -127,20 +129,26 @@ class AlarmRingingActivity : ComponentActivity() {
                     mathMission = math,
                     snoozeMinutes = snoozeMins,
                     onDismissAlarm = {
-                        AlarmSoundPlayer.stop(this)
-                        AlarmService.stopAlarm(this)
-                        AlarmOverlayManager.dismissOverlay()
-                        val nm = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
-                        nm?.cancel(AlarmReceiver.NOTIFICATION_ID)
+                        try { AlarmSoundPlayer.stop(this) } catch (_: Throwable) {}
+                        try { AlarmService.stopAlarm(this) } catch (_: Throwable) {}
+                        try { AlarmOverlayManager.dismissOverlay() } catch (_: Throwable) {}
+                        try {
+                            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+                            nm?.cancel(AlarmReceiver.NOTIFICATION_ID)
+                        } catch (_: Throwable) {}
                         finish()
                     },
                     onSnoozeAlarm = {
-                        AlarmSoundPlayer.stop(this)
-                        AlarmService.stopAlarm(this)
-                        AlarmOverlayManager.dismissOverlay()
-                        val nm = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
-                        nm?.cancel(AlarmReceiver.NOTIFICATION_ID)
-                        AlarmScheduler.scheduleSnooze(this, alarmId, label, sound, vibrate, math, snoozeMins, vibrationOnly, volume)
+                        try { AlarmSoundPlayer.stop(this) } catch (_: Throwable) {}
+                        try { AlarmService.stopAlarm(this) } catch (_: Throwable) {}
+                        try { AlarmOverlayManager.dismissOverlay() } catch (_: Throwable) {}
+                        try {
+                            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+                            nm?.cancel(AlarmReceiver.NOTIFICATION_ID)
+                        } catch (_: Throwable) {}
+                        try {
+                            AlarmScheduler.scheduleSnooze(this, alarmId, label, sound, vibrate, math, snoozeMins, vibrationOnly, volume)
+                        } catch (_: Throwable) {}
                         finish()
                     }
                 )
@@ -154,7 +162,7 @@ class AlarmRingingActivity : ComponentActivity() {
                 activityWakeLock?.release()
             }
             activityWakeLock = null
-        } catch (_: Exception) {}
+        } catch (_: Throwable) {}
         super.onDestroy()
     }
 }

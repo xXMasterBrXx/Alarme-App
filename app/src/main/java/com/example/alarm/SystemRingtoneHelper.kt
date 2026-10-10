@@ -14,19 +14,23 @@ object SystemRingtoneHelper {
     fun getAvailableTones(context: Context): List<SystemTone> {
         val list = mutableListOf<SystemTone>()
 
-        // 1. Default system alarm tone
+        // 1. Tons integrados de alta confiabilidade (sempre disponíveis)
+        list.add(SystemTone(title = "🔔 Melodia Suave (Integrado)", uriString = "gentle"))
+        list.add(SystemTone(title = "⏰ Alarme Digital (Integrado)", uriString = "digital"))
+
+        // 2. Default system alarm tone
         try {
             val defaultAlarmUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
                 ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
             if (defaultAlarmUri != null) {
                 val ringtone = RingtoneManager.getRingtone(context, defaultAlarmUri)
                 val defaultTitle = ringtone?.getTitle(context) ?: "Padrão do Sistema"
-                list.add(SystemTone(title = "Padrão ($defaultTitle)", uriString = defaultAlarmUri.toString()))
+                list.add(SystemTone(title = "Toque do Sistema ($defaultTitle)", uriString = defaultAlarmUri.toString()))
             }
         } catch (_: Exception) {
         }
 
-        // 2. Query all device alarm and ringtone sounds
+        // 3. Query all device alarm and ringtone sounds
         try {
             val ringtoneManager = RingtoneManager(context).apply {
                 setType(RingtoneManager.TYPE_ALARM or RingtoneManager.TYPE_RINGTONE)
@@ -57,14 +61,11 @@ object SystemRingtoneHelper {
             return parsed?.second?.let { "▶️ $it" } ?: "YouTube Som"
         }
 
-        if (uriString.isBlank() || uriString == "default" || uriString == "gentle") {
-            return try {
-                val defaultAlarmUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
-                val ringtone = defaultAlarmUri?.let { RingtoneManager.getRingtone(context, it) }
-                ringtone?.getTitle(context) ?: "Padrão do Sistema"
-            } catch (_: Exception) {
-                "Padrão do Sistema"
-            }
+        if (uriString == "gentle" || uriString == "default" || uriString.isBlank()) {
+            return "🔔 Melodia Suave"
+        }
+        if (uriString == "digital" || uriString == "radar") {
+            return "⏰ Alarme Digital"
         }
 
         return try {

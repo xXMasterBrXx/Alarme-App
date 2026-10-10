@@ -123,18 +123,7 @@ class AlarmViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun testAlarmImmediately(context: Context, alarm: AlarmEntity) {
-        val triggerIntent = Intent(context, AlarmReceiver::class.java).apply {
-            action = AlarmScheduler.ACTION_ALARM_TRIGGER
-            putExtra(AlarmScheduler.EXTRA_ALARM_ID, alarm.id)
-            putExtra(AlarmScheduler.EXTRA_ALARM_LABEL, "${alarm.label} (Teste)")
-            putExtra(AlarmScheduler.EXTRA_ALARM_SOUND, alarm.soundTone)
-            putExtra(AlarmScheduler.EXTRA_ALARM_VIBRATE, alarm.vibrate)
-            putExtra(AlarmScheduler.EXTRA_ALARM_VIBRATION_ONLY, alarm.vibrationOnly)
-            putExtra(AlarmScheduler.EXTRA_ALARM_MATH, alarm.mathMission)
-            putExtra(AlarmScheduler.EXTRA_ALARM_SNOOZE_MINS, alarm.snoozeMinutes)
-            putExtra(AlarmScheduler.EXTRA_ALARM_VOLUME, alarm.volume)
-        }
-        context.sendBroadcast(triggerIntent)
+        AlarmScheduler.triggerAlarmImmediately(context, alarm)
     }
 
     fun getNextUpcomingAlarmInfo(alarmsList: List<AlarmEntity>): Pair<AlarmEntity, String>? {

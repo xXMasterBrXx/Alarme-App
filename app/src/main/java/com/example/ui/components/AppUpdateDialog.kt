@@ -178,6 +178,28 @@ fun AppUpdateDialog(
                                 .clip(RoundedCornerShape(4.dp))
                         )
                     }
+                } else if (GitHubUpdateManager.isApkDownloaded(context)) {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
+                        ),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(
+                                text = "✅ APK baixado com sucesso!",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer
+                            )
+                            Text(
+                                text = "💡 Caso o Android exiba 'App não instalado', significa que a versão anterior instalada possui chave diferente. Desinstale o app atual uma única vez para sincronizar.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
                 }
 
                 if (errorMessage != null) {
@@ -190,9 +212,14 @@ fun AppUpdateDialog(
             }
         },
         confirmButton = {
+            val isDownloaded = GitHubUpdateManager.isApkDownloaded(context)
             Button(
                 onClick = {
-                    if (!isDownloading) {
+                    if (isDownloaded && !isDownloading) {
+                        GitHubUpdateManager.installDownloadedApk(context) { err ->
+                            errorMessage = err
+                        }
+                    } else if (!isDownloading) {
                         isDownloading = true
                         errorMessage = null
                         scope.launch {
@@ -225,6 +252,10 @@ fun AppUpdateDialog(
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text("Baixando...")
+                } else if (isDownloaded) {
+                    Icon(Icons.Default.SystemUpdate, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Instalar APK")
                 } else {
                     Icon(Icons.Default.CloudDownload, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(6.dp))
@@ -233,9 +264,28 @@ fun AppUpdateDialog(
             }
         },
         dismissButton = {
-            if (!isDownloading) {
-                OutlinedButton(onClick = onDismiss) {
-                    Text("Mais tarde")
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(
+                    onClick = {
+                        try {
+                            val intent = android.content.Intent(
+                                android.content.Intent.ACTION_VIEW,
+                                android.net.Uri.parse("https://github.com/${GitHubUpdateManager.getTargetRepo(context)}/releases")
+                            ).apply {
+                                flags = android.content.Intent.FLAG_ACTIVITY_NEW_TASK
+                            }
+                            context.startActivity(intent)
+                        } catch (_: Exception) {}
+                    }
+                ) {
+                    Icon(Icons.Default.OpenInBrowser, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Navegador")
+                }
+                if (!isDownloading) {
+                    OutlinedButton(onClick = onDismiss) {
+                        Text("Fechar")
+                    }
                 }
             }
         }

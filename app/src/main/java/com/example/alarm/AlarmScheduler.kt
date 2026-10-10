@@ -98,20 +98,43 @@ object AlarmScheduler {
      * Immediately triggers the alarm for instant testing by the user from the UI.
      */
     fun triggerAlarmImmediately(context: Context, alarm: AlarmEntity) {
-        val intent = Intent(context, AlarmReceiver::class.java).apply {
-            action = ACTION_ALARM_TRIGGER
-            putExtra(EXTRA_ALARM_ID, alarm.id)
-            putExtra(EXTRA_ALARM_LABEL, "${alarm.label} (Teste)")
-            putExtra(EXTRA_ALARM_HOUR, alarm.hour)
-            putExtra(EXTRA_ALARM_MINUTE, alarm.minute)
-            putExtra(EXTRA_ALARM_SOUND, alarm.soundTone)
-            putExtra(EXTRA_ALARM_VIBRATE, alarm.vibrate)
-            putExtra(EXTRA_ALARM_VIBRATION_ONLY, alarm.vibrationOnly)
-            putExtra(EXTRA_ALARM_MATH, alarm.mathMission)
-            putExtra(EXTRA_ALARM_SNOOZE_MINS, alarm.snoozeMinutes)
-            putExtra(EXTRA_ALARM_VOLUME, alarm.volume)
+        try {
+            val intent = Intent(context, AlarmReceiver::class.java).apply {
+                action = ACTION_ALARM_TRIGGER
+                putExtra(EXTRA_ALARM_ID, alarm.id)
+                putExtra(EXTRA_ALARM_LABEL, "${alarm.label} (Teste)")
+                putExtra(EXTRA_ALARM_HOUR, alarm.hour)
+                putExtra(EXTRA_ALARM_MINUTE, alarm.minute)
+                putExtra(EXTRA_ALARM_SOUND, alarm.soundTone)
+                putExtra(EXTRA_ALARM_VIBRATE, alarm.vibrate)
+                putExtra(EXTRA_ALARM_VIBRATION_ONLY, alarm.vibrationOnly)
+                putExtra(EXTRA_ALARM_MATH, alarm.mathMission)
+                putExtra(EXTRA_ALARM_SNOOZE_MINS, alarm.snoozeMinutes)
+                putExtra(EXTRA_ALARM_VOLUME, alarm.volume)
+            }
+            context.sendBroadcast(intent)
+        } catch (_: Throwable) {
+            // Fallback direto para abrir a tela caso o envio de broadcast falhe
+            try {
+                val ringingIntent = Intent(context, AlarmRingingActivity::class.java).apply {
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                            Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                            Intent.FLAG_ACTIVITY_SINGLE_TOP or
+                            Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
+                    putExtra(EXTRA_ALARM_ID, alarm.id)
+                    putExtra(EXTRA_ALARM_LABEL, "${alarm.label} (Teste)")
+                    putExtra(EXTRA_ALARM_HOUR, alarm.hour)
+                    putExtra(EXTRA_ALARM_MINUTE, alarm.minute)
+                    putExtra(EXTRA_ALARM_SOUND, alarm.soundTone)
+                    putExtra(EXTRA_ALARM_VIBRATE, alarm.vibrate)
+                    putExtra(EXTRA_ALARM_VIBRATION_ONLY, alarm.vibrationOnly)
+                    putExtra(EXTRA_ALARM_MATH, alarm.mathMission)
+                    putExtra(EXTRA_ALARM_SNOOZE_MINS, alarm.snoozeMinutes)
+                    putExtra(EXTRA_ALARM_VOLUME, alarm.volume)
+                }
+                context.startActivity(ringingIntent)
+            } catch (_: Throwable) {}
         }
-        context.sendBroadcast(intent)
     }
 
     fun scheduleSnooze(

@@ -198,6 +198,17 @@ object GitHubUpdateManager {
         return if (ver.startsWith("v") || ver.startsWith("V")) ver else "v$ver"
     }
 
+    fun getDownloadedApkFile(context: Context): File {
+        val downloadDir = File(context.cacheDir, "updates")
+        downloadDir.mkdirs()
+        return File(downloadDir, "chronoclock-update.apk")
+    }
+
+    fun isApkDownloaded(context: Context): Boolean {
+        val file = getDownloadedApkFile(context)
+        return file.exists() && file.length() > 1000L
+    }
+
     suspend fun downloadAndInstallApk(
         context: Context,
         downloadUrl: String,
@@ -221,12 +232,7 @@ object GitHubUpdateManager {
         }
 
         try {
-            val downloadDir = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
-                ?: context.externalCacheDir
-                ?: File(context.cacheDir, "updates")
-            downloadDir.mkdirs()
-            val destinationFile = File(downloadDir, "chronoclock-update.apk")
-
+            val destinationFile = getDownloadedApkFile(context)
             if (destinationFile.exists()) {
                 destinationFile.delete()
             }
@@ -296,6 +302,11 @@ object GitHubUpdateManager {
         }
     }
 
+    fun installDownloadedApk(context: Context, onError: (String) -> Unit) {
+        val file = getDownloadedApkFile(context)
+        installApk(context, file, onError)
+    }
+
     private fun installApk(context: Context, apkFile: File, onError: (String) -> Unit) {
         try {
             if (!apkFile.exists() || apkFile.length() < 1000L) {
@@ -346,6 +357,7 @@ object GitHubUpdateManager {
                 flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or
                         Intent.FLAG_ACTIVITY_NEW_TASK or
                         Intent.FLAG_ACTIVITY_CLEAR_TOP
+                clipData = android.content.ClipData.newRawUri("APK", contentUri)
                 putExtra(Intent.EXTRA_NOT_UNKNOWN_SOURCE, true)
             }
 
@@ -387,6 +399,7 @@ object GitHubUpdateManager {
                 val fallbackIntent = Intent(Intent.ACTION_INSTALL_PACKAGE).apply {
                     setDataAndType(contentUri, "application/vnd.android.package-archive")
                     flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK
+                    clipData = android.content.ClipData.newRawUri("APK", contentUri)
                     putExtra(Intent.EXTRA_NOT_UNKNOWN_SOURCE, true)
                 }
                 context.startActivity(fallbackIntent)
