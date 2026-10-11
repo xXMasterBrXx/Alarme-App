@@ -137,7 +137,7 @@ fun EditAlarmSheet(
     var specificDateMillis by remember { mutableStateOf<Long?>(alarm?.specificDateMillis) }
     var vibrate by remember { mutableStateOf(alarm?.vibrate ?: true) }
     var vibrationOnly by remember { mutableStateOf(alarm?.vibrationOnly ?: false) }
-    var soundTone by remember { mutableStateOf(alarm?.soundTone ?: "default") }
+    var soundTone by remember { mutableStateOf(alarm?.soundTone?.ifBlank { "gentle" } ?: "gentle") }
     var snoozeMinutes by remember { mutableIntStateOf(alarm?.snoozeMinutes ?: 10) }
     var mathMission by remember { mutableStateOf(alarm?.mathMission ?: false) }
 
@@ -866,13 +866,17 @@ fun EditAlarmSheet(
             // Test Trigger Button
             OutlinedButton(
                 onClick = {
+                    previewingTone = null
+                    AlarmSoundPlayer.stopPreview()
+                    AlarmSoundPlayer.stop(context)
+
                     val daysString = if (specificDateMillis == null) selectedDays.sorted().joinToString(",") else ""
                     val tempAlarm = (alarm ?: AlarmEntity(hour = hour, minute = minute)).copy(
                         hour = hour,
                         minute = minute,
                         label = label.ifBlank { "Alarme" },
                         daysOfWeek = daysString,
-                        vibrate = vibrate || vibrationOnly,
+                        vibrate = if (vibrationOnly) true else vibrate,
                         vibrationOnly = vibrationOnly,
                         soundTone = soundTone,
                         snoozeMinutes = snoozeMinutes,

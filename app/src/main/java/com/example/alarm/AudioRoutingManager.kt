@@ -104,17 +104,23 @@ object AudioRoutingManager {
     }
 
     /**
-     * Enforces audio routing so that audio plays out of the phone's internal speaker
-     * as well as any connected Bluetooth/wired headphones.
+     * Enforces audio routing and adjusts the phone's hardware alarm stream volume
+     * dynamically according to the volume percent chosen for the alarm.
      */
-    fun configureDualAudioOutput(context: Context) {
+    fun configureDualAudioOutput(context: Context, volumePercent: Float = 0.8f) {
         try {
             val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager ?: return
+            val clampedPercent = volumePercent.coerceIn(0.05f, 1.0f)
+
             val maxAlarmVol = audioManager.getStreamMaxVolume(AudioManager.STREAM_ALARM)
-            val currentVol = audioManager.getStreamVolume(AudioManager.STREAM_ALARM)
-            if (currentVol < (maxAlarmVol * 0.6f)) {
-                audioManager.setStreamVolume(AudioManager.STREAM_ALARM, (maxAlarmVol * 0.85f).toInt(), 0)
-            }
+            val desiredStreamVol = kotlin.math.round(maxAlarmVol * clampedPercent).toInt().coerceIn(1, maxAlarmVol)
+            audioManager.setStreamVolume(AudioManager.STREAM_ALARM, desiredStreamVol, 0)
+
+            try {
+                val maxMusicVol = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+                val desiredMusicVol = kotlin.math.round(maxMusicVol * clampedPercent).toInt().coerceIn(1, maxMusicVol)
+                audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, desiredMusicVol, 0)
+            } catch (_: Throwable) {}
         } catch (_: Throwable) {
         }
     }

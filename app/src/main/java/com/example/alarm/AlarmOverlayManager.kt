@@ -31,6 +31,7 @@ object AlarmOverlayManager {
         label: String,
         sound: String,
         vibrate: Boolean,
+        vibrationOnly: Boolean = false,
         math: Boolean,
         snoozeMinutes: Int,
         volume: Float
@@ -132,7 +133,7 @@ object AlarmOverlayManager {
                         AlarmService.stopAlarm(context)
                         val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
                         nm?.cancel(AlarmReceiver.NOTIFICATION_ID)
-                        AlarmScheduler.scheduleSnooze(context, alarmId, label, sound, vibrate, math, snoozeMinutes, false, volume)
+                        AlarmScheduler.scheduleSnooze(context, alarmId, label, sound, vibrate, math, snoozeMinutes, vibrationOnly, volume)
                     }
                 }
 
@@ -153,6 +154,7 @@ object AlarmOverlayManager {
                                 putExtra(AlarmScheduler.EXTRA_ALARM_LABEL, label)
                                 putExtra(AlarmScheduler.EXTRA_ALARM_SOUND, sound)
                                 putExtra(AlarmScheduler.EXTRA_ALARM_VIBRATE, vibrate)
+                                putExtra(AlarmScheduler.EXTRA_ALARM_VIBRATION_ONLY, vibrationOnly)
                                 putExtra(AlarmScheduler.EXTRA_ALARM_MATH, math)
                                 putExtra(AlarmScheduler.EXTRA_ALARM_SNOOZE_MINS, snoozeMinutes)
                                 putExtra(AlarmScheduler.EXTRA_ALARM_VOLUME, volume)
@@ -180,6 +182,7 @@ object AlarmOverlayManager {
                         putExtra(AlarmScheduler.EXTRA_ALARM_LABEL, label)
                         putExtra(AlarmScheduler.EXTRA_ALARM_SOUND, sound)
                         putExtra(AlarmScheduler.EXTRA_ALARM_VIBRATE, vibrate)
+                        putExtra(AlarmScheduler.EXTRA_ALARM_VIBRATION_ONLY, vibrationOnly)
                         putExtra(AlarmScheduler.EXTRA_ALARM_MATH, math)
                         putExtra(AlarmScheduler.EXTRA_ALARM_SNOOZE_MINS, snoozeMinutes)
                         putExtra(AlarmScheduler.EXTRA_ALARM_VOLUME, volume)

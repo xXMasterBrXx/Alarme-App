@@ -10,6 +10,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -18,6 +20,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -69,6 +72,7 @@ import androidx.compose.ui.unit.sp
 import com.example.data.model.AlarmEntity
 import com.example.ui.theme.LocalTimeAtmosphere
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun AlarmScreen(
     viewModel: AlarmViewModel
@@ -334,9 +338,12 @@ fun AlarmScreen(
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                FlowRow(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .padding(end = 8.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    verticalArrangement = Arrangement.spacedBy(6.dp)
                                 ) {
                                     Box(
                                         modifier = Modifier
@@ -348,11 +355,13 @@ fun AlarmScreen(
                                             text = alarm.getDaysDescription(),
                                             style = MaterialTheme.typography.labelSmall,
                                             fontWeight = FontWeight.Medium,
-                                            color = MaterialTheme.colorScheme.primary
+                                            color = MaterialTheme.colorScheme.primary,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
                                         )
                                     }
 
-                                     if (alarm.vibrationOnly) {
+                                    if (alarm.vibrationOnly) {
                                         Box(
                                             modifier = Modifier
                                                 .clip(RoundedCornerShape(8.dp))
@@ -367,6 +376,24 @@ fun AlarmScreen(
                                             )
                                         }
                                     } else {
+                                        val toneTitle = remember(alarm.soundTone) {
+                                            com.example.alarm.SystemRingtoneHelper.getToneTitle(context, alarm.soundTone)
+                                        }
+                                        Box(
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                                        ) {
+                                            Text(
+                                                text = toneTitle,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+
                                         Box(
                                             modifier = Modifier
                                                 .clip(RoundedCornerShape(8.dp))
@@ -381,22 +408,38 @@ fun AlarmScreen(
                                         }
 
                                         if (alarm.vibrate) {
-                                            Icon(
-                                                imageVector = Icons.Default.Vibration,
-                                                contentDescription = "Vibração ativada",
-                                                modifier = Modifier.size(16.dp),
-                                                tint = MaterialTheme.colorScheme.outline
-                                            )
+                                            Box(
+                                                modifier = Modifier
+                                                    .clip(RoundedCornerShape(8.dp))
+                                                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f))
+                                                    .padding(horizontal = 6.dp, vertical = 4.dp),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Vibration,
+                                                    contentDescription = "Vibração ativada",
+                                                    modifier = Modifier.size(14.dp),
+                                                    tint = MaterialTheme.colorScheme.outline
+                                                )
+                                            }
                                         }
                                     }
 
                                     if (alarm.mathMission) {
-                                        Icon(
-                                            imageVector = Icons.Default.Psychology,
-                                            contentDescription = "Desafio Matemático",
-                                            modifier = Modifier.size(16.dp),
-                                            tint = MaterialTheme.colorScheme.secondary
-                                        )
+                                        Box(
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .background(MaterialTheme.colorScheme.secondary.copy(alpha = 0.15f))
+                                                .padding(horizontal = 6.dp, vertical = 4.dp),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Psychology,
+                                                contentDescription = "Desafio Matemático",
+                                                modifier = Modifier.size(14.dp),
+                                                tint = MaterialTheme.colorScheme.secondary
+                                            )
+                                        }
                                     }
                                 }
 
@@ -409,7 +452,7 @@ fun AlarmScreen(
                                             com.example.alarm.AlarmScheduler.triggerAlarmImmediately(context, alarm)
                                         },
                                         modifier = Modifier
-                                            .size(32.dp)
+                                            .size(36.dp)
                                             .testTag("test_alarm_${alarm.id}")
                                     ) {
                                         Icon(
@@ -422,13 +465,15 @@ fun AlarmScreen(
 
                                     IconButton(
                                         onClick = { alarmToDelete = alarm },
-                                        modifier = Modifier.size(32.dp)
+                                        modifier = Modifier
+                                            .size(36.dp)
+                                            .testTag("delete_alarm_${alarm.id}")
                                     ) {
                                         Icon(
                                             imageVector = Icons.Default.Delete,
                                             contentDescription = "Excluir alarme",
                                             tint = MaterialTheme.colorScheme.outline.copy(alpha = 0.7f),
-                                            modifier = Modifier.size(18.dp)
+                                            modifier = Modifier.size(20.dp)
                                         )
                                     }
                                 }

@@ -3,6 +3,7 @@ package com.example.alarm
 import android.app.KeyguardManager
 import android.app.NotificationManager
 import android.content.Context
+import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 import android.os.PowerManager
@@ -76,6 +77,15 @@ class AlarmRingingActivity : ComponentActivity() {
 
     private var activityWakeLock: PowerManager.WakeLock? = null
 
+    private var alarmIdState = mutableStateOf(0L)
+    private var labelState = mutableStateOf("Despertador")
+    private var soundState = mutableStateOf("gentle")
+    private var vibrateState = mutableStateOf(true)
+    private var vibrationOnlyState = mutableStateOf(false)
+    private var mathState = mutableStateOf(false)
+    private var snoozeMinsState = mutableStateOf(10)
+    private var volumeState = mutableStateOf(0.8f)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -104,30 +114,19 @@ class AlarmRingingActivity : ComponentActivity() {
             activityWakeLock?.acquire(10 * 60 * 1000L)
         } catch (_: Throwable) {}
 
-        val alarmId = intent.getLongExtra(AlarmScheduler.EXTRA_ALARM_ID, 0L)
-        val label = intent.getStringExtra(AlarmScheduler.EXTRA_ALARM_LABEL) ?: "Despertador"
-        val sound = intent.getStringExtra(AlarmScheduler.EXTRA_ALARM_SOUND) ?: "default"
-        val vibrate = intent.getBooleanExtra(AlarmScheduler.EXTRA_ALARM_VIBRATE, true)
-        val vibrationOnly = intent.getBooleanExtra(AlarmScheduler.EXTRA_ALARM_VIBRATION_ONLY, false)
-        val math = intent.getBooleanExtra(AlarmScheduler.EXTRA_ALARM_MATH, false)
-        val snoozeMins = intent.getIntExtra(AlarmScheduler.EXTRA_ALARM_SNOOZE_MINS, 10)
-        val volume = intent.getFloatExtra(AlarmScheduler.EXTRA_ALARM_VOLUME, 0.8f)
-
-        // Ensure audio & vibration are playing
-        try {
-            if (!AlarmSoundPlayer.isPlaying) {
-                AlarmSoundPlayer.play(this, sound, vibrate, vibrationOnly, volume)
-            }
-        } catch (_: Throwable) {}
+        applyIntent(intent)
 
         setContent {
             ChronoDynamicTheme {
                 com.example.ui.components.YouTubeAudioHost()
                 AlarmRingingScreen(
-                    label = label,
-                    vibrationOnly = vibrationOnly,
-                    mathMission = math,
-                    snoozeMinutes = snoozeMins,
+                    label = labelState.value,
+                    soundTone = soundState.value,
+                    volume = volumeState.value,
+                    vibrate = vibrateState.value,
+                    vibrationOnly = vibrationOnlyState.value,
+                    mathMission = mathState.value,
+                    snoozeMinutes = snoozeMinsState.value,
                     onDismissAlarm = {
                         try { AlarmSoundPlayer.stop(this) } catch (_: Throwable) {}
                         try { AlarmService.stopAlarm(this) } catch (_: Throwable) {}
@@ -147,13 +146,55 @@ class AlarmRingingActivity : ComponentActivity() {
                             nm?.cancel(AlarmReceiver.NOTIFICATION_ID)
                         } catch (_: Throwable) {}
                         try {
-                            AlarmScheduler.scheduleSnooze(this, alarmId, label, sound, vibrate, math, snoozeMins, vibrationOnly, volume)
+                            AlarmScheduler.scheduleSnooze(
+                                this,
+                                alarmIdState.value,
+                                labelState.value,
+                                soundState.value,
+                                vibrateState.value,
+                                mathState.value,
+                                snoozeMinsState.value,
+                                vibrationOnlyState.value,
+                                volumeState.value
+                            )
                         } catch (_: Throwable) {}
                         finish()
                     }
                 )
             }
         }
+    }
+
+    override fun onNewIntent(newIntent: Intent) {
+        super.onNewIntent(newIntent)
+        setIntent(newIntent)
+        applyIntent(newIntent)
+    }
+
+    private fun applyIntent(incomingIntent: Intent?) {
+        if (incomingIntent == null) return
+        val id = incomingIntent.getLongExtra(AlarmScheduler.EXTRA_ALARM_ID, 0L)
+        val lbl = incomingIntent.getStringExtra(AlarmScheduler.EXTRA_ALARM_LABEL) ?: "Despertador"
+        val snd = incomingIntent.getStringExtra(AlarmScheduler.EXTRA_ALARM_SOUND) ?: "gentle"
+        val vib = incomingIntent.getBooleanExtra(AlarmScheduler.EXTRA_ALARM_VIBRATE, true)
+        val vibOnly = incomingIntent.getBooleanExtra(AlarmScheduler.EXTRA_ALARM_VIBRATION_ONLY, false)
+        val mth = incomingIntent.getBooleanExtra(AlarmScheduler.EXTRA_ALARM_MATH, false)
+        val snz = incomingIntent.getIntExtra(AlarmScheduler.EXTRA_ALARM_SNOOZE_MINS, 10)
+        val vol = incomingIntent.getFloatExtra(AlarmScheduler.EXTRA_ALARM_VOLUME, 0.8f)
+
+        alarmIdState.value = id
+        labelState.value = lbl
+        soundState.value = snd
+        vibrateState.value = vib
+        vibrationOnlyState.value = vibOnly
+        mathState.value = mth
+        snoozeMinsState.value = snz
+        volumeState.value = vol
+
+        // Garante que o áudio e a vibração reflitam com precisão absoluta as configurações do alarme
+        try {
+            AlarmSoundPlayer.play(this, snd, vib, vibOnly, vol)
+        } catch (_: Throwable) {}
     }
 
     override fun onDestroy() {
@@ -170,9 +211,12 @@ class AlarmRingingActivity : ComponentActivity() {
 @Composable
 fun AlarmRingingScreen(
     label: String,
-    vibrationOnly: Boolean,
-    mathMission: Boolean,
-    snoozeMinutes: Int,
+    soundTone: String = "default",
+    volume: Float = 0.8f,
+    vibrate: Boolean = true,
+    vibrationOnly: Boolean = false,
+    mathMission: Boolean = false,
+    snoozeMinutes: Int = 10,
     onDismissAlarm: () -> Unit,
     onSnoozeAlarm: () -> Unit
 ) {
@@ -275,6 +319,36 @@ fun AlarmRingingScreen(
                     style = MaterialTheme.typography.bodyLarge,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+
+                // Badge de resumo das configurações ativas
+                val toneTitle = remember(soundTone) { SystemRingtoneHelper.getToneTitle(context, soundTone) }
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.75f),
+                    modifier = Modifier.padding(top = 10.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                    ) {
+                        if (vibrationOnly) {
+                            Text(
+                                text = "📳 Apenas Vibração (Silencioso)",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        } else {
+                            Text(
+                                text = "$toneTitle • ${(volume * 100).toInt()}%${if (vibrate) " • 📳 Vibração" else " • 🔇 Sem vibração"}",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
             }
 
             // Pulsing Alarm Clock Center Element

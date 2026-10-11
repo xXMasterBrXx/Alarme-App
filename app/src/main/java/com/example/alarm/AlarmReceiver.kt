@@ -157,6 +157,7 @@ class AlarmReceiver : BroadcastReceiver() {
                             label = label,
                             sound = sound,
                             vibrate = vibrate,
+                            vibrationOnly = vibrationOnly,
                             math = math,
                             snoozeMinutes = snoozeMins,
                             volume = volume

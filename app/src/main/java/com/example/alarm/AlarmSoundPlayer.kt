@@ -53,28 +53,28 @@ object AlarmSoundPlayer {
         vibrationOnly: Boolean = false,
         volume: Float = 0.8f
     ) {
-        if (isPlaying) {
-            Log.d(TAG, "AlarmSoundPlayer já está tocando, ignorando chamada redundante")
-            return
-        }
-        stop()
+        // Interrompe qualquer reprodução anterior ou preview para aplicar as novas configurações
+        stop(context)
         isPlaying = true
 
-        val targetVolume = volume.coerceIn(0.1f, 1.0f)
-        AudioRoutingManager.configureDualAudioOutput(context)
+        val targetVolume = volume.coerceIn(0.05f, 1.0f)
+        AudioRoutingManager.configureDualAudioOutput(context, targetVolume)
 
         val alarmAudioAttrs = AudioAttributes.Builder()
             .setUsage(AudioAttributes.USAGE_ALARM)
             .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
             .build()
 
-        // 1. Iniciar Vibração Contínua
-        if (shouldVibrate || vibrationOnly) {
+        // 1. Iniciar Vibração Contínua somente se solicitado
+        if (vibrationOnly || shouldVibrate) {
             startVibration(context, alarmAudioAttrs)
+        } else {
+            try { vibrator?.cancel() } catch (_: Throwable) {}
         }
 
         // 2. Se for somente vibração ou silencioso, encerra aqui
         if (vibrationOnly || soundTone == "silent") {
+            Log.d(TAG, "Modo Apenas Vibração ativo, áudio suprimido conforme configuração")
             return
         }
 
@@ -101,6 +101,7 @@ object AlarmSoundPlayer {
                 context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
             }
 
+            // Pattern: 0ms wait, 800ms vibrate, 400ms wait, 800ms vibrate, 400ms wait, repeat at index 0 indefinitely
             val pattern = longArrayOf(0, 800, 400, 800, 400)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 try {
@@ -111,24 +112,6 @@ object AlarmSoundPlayer {
             } else {
                 @Suppress("DEPRECATION")
                 vibrator?.vibrate(pattern, 0)
-            }
-
-            // Batimento de redundância caso o hardware interrompa a vibração contínua
-            vibrationHeartbeatJob?.cancel()
-            vibrationHeartbeatJob = CoroutineScope(Dispatchers.Main).launch {
-                while (isActive && isPlaying) {
-                    delay(3000L)
-                    if (isPlaying && vibrator?.hasVibrator() == true) {
-                        try {
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                                vibrator?.vibrate(VibrationEffect.createOneShot(1000L, VibrationEffect.DEFAULT_AMPLITUDE))
-                            } else {
-                                @Suppress("DEPRECATION")
-                                vibrator?.vibrate(1000L)
-                            }
-                        } catch (_: Throwable) {}
-                    }
-                }
             }
         } catch (t: Throwable) {
             Log.w(TAG, "Falha ao iniciar vibrador", t)
@@ -284,8 +267,8 @@ object AlarmSoundPlayer {
         onFinished: () -> Unit = {}
     ) {
         stopPreview()
-        AudioRoutingManager.configureDualAudioOutput(context)
-        val targetVolume = volume.coerceIn(0.1f, 1.0f)
+        val targetVolume = volume.coerceIn(0.05f, 1.0f)
+        AudioRoutingManager.configureDualAudioOutput(context, targetVolume)
 
         if (uriString.startsWith("youtube://")) {
             val parsed = YouTubeSoundService.parseSoundTone(uriString)
