@@ -117,7 +117,17 @@ object GitHubUpdateManager {
                     downloadUrl = releaseObj.optString("html_url", "https://github.com/$repo/releases/latest")
                 }
 
-                val currentVersion = BuildConfig.VERSION_NAME
+                val currentVersion = try {
+                    val pInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        context.packageManager.getPackageInfo(context.packageName, android.content.pm.PackageManager.PackageInfoFlags.of(0))
+                    } else {
+                        @Suppress("DEPRECATION")
+                        context.packageManager.getPackageInfo(context.packageName, 0)
+                    }
+                    pInfo.versionName?.takeIf { it.isNotBlank() } ?: BuildConfig.VERSION_NAME
+                } catch (_: Exception) {
+                    BuildConfig.VERSION_NAME
+                }
                 val remoteVersion = tagName.removePrefix("v").removePrefix("V").trim()
                 val isNewer = isVersionNewer(tagName, currentVersion)
 
@@ -194,14 +204,28 @@ object GitHubUpdateManager {
             }
         } catch (_: Exception) {}
 
-        val ver = BuildConfig.VERSION_NAME.trim()
+        val ver = try {
+            val pInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                context.packageManager.getPackageInfo(context.packageName, android.content.pm.PackageManager.PackageInfoFlags.of(0))
+            } else {
+                @Suppress("DEPRECATION")
+                context.packageManager.getPackageInfo(context.packageName, 0)
+            }
+            pInfo.versionName?.takeIf { it.isNotBlank() } ?: BuildConfig.VERSION_NAME
+        } catch (_: Exception) {
+            BuildConfig.VERSION_NAME
+        }.trim()
+
         return if (ver.startsWith("v") || ver.startsWith("V")) ver else "v$ver"
     }
 
     fun getDownloadedApkFile(context: Context): File {
-        val downloadDir = File(context.cacheDir, "updates")
-        downloadDir.mkdirs()
-        return File(downloadDir, "chronoclock-update.apk")
+        val downloadDir = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
+            ?: context.externalCacheDir
+            ?: context.cacheDir
+        val updatesDir = File(downloadDir, "updates")
+        updatesDir.mkdirs()
+        return File(updatesDir, "chronoclock-update.apk")
     }
 
     fun isApkDownloaded(context: Context): Boolean {
