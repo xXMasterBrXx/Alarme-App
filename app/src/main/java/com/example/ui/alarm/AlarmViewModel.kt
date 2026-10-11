@@ -28,6 +28,17 @@ class AlarmViewModel(application: Application) : AndroidViewModel(application) {
             initialValue = emptyList()
         )
 
+    private val _newAlarmDraft = MutableStateFlow<AlarmEntity?>(null)
+    val newAlarmDraft: StateFlow<AlarmEntity?> = _newAlarmDraft.asStateFlow()
+
+    fun updateNewAlarmDraft(draft: AlarmEntity?) {
+        _newAlarmDraft.value = draft
+    }
+
+    fun clearNewAlarmDraft() {
+        _newAlarmDraft.value = null
+    }
+
     init {
         // Pre-populate default sample alarms ONLY on the very first install run
         viewModelScope.launch {
@@ -85,6 +96,7 @@ class AlarmViewModel(application: Application) : AndroidViewModel(application) {
     fun saveAlarm(alarm: AlarmEntity) {
         viewModelScope.launch {
             if (alarm.id == 0L) {
+                clearNewAlarmDraft()
                 val newId = alarmDao.insertAlarm(alarm)
                 val savedAlarm = alarm.copy(id = newId)
                 if (savedAlarm.isEnabled) {

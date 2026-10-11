@@ -43,6 +43,7 @@ import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Psychology
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Vibration
@@ -69,6 +70,7 @@ import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SuggestionChip
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
@@ -77,6 +79,7 @@ import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -120,7 +123,9 @@ import java.util.TimeZone
 fun EditAlarmSheet(
     alarm: AlarmEntity?,
     onDismiss: () -> Unit,
-    onSave: (AlarmEntity) -> Unit
+    onSave: (AlarmEntity) -> Unit,
+    onDraftUpdate: ((AlarmEntity) -> Unit)? = null,
+    onResetDraft: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
     val keyboardController = LocalSoftwareKeyboardController.current
@@ -130,7 +135,11 @@ fun EditAlarmSheet(
 
     YouTubeAudioHost()
 
-    var hour by remember { mutableIntStateOf(alarm?.hour ?: 7) }
+    val defaultHour = remember {
+        val cal = Calendar.getInstance()
+        (cal.get(Calendar.HOUR_OF_DAY) + 1) % 24
+    }
+    var hour by remember { mutableIntStateOf(alarm?.hour ?: defaultHour) }
     var minute by remember { mutableIntStateOf(alarm?.minute ?: 0) }
     var label by remember { mutableStateOf(alarm?.label ?: "Alarme") }
     var volume by remember { mutableFloatStateOf(alarm?.volume ?: 0.8f) }
@@ -203,6 +212,35 @@ fun EditAlarmSheet(
         Pair(6, "Sáb")
     )
 
+    // Notifica atualizações de rascunho enquanto o usuário edita um novo alarme
+    LaunchedEffect(
+        hour, minute, label, volume, specificDateMillis,
+        vibrate, vibrationOnly, soundTone, snoozeMinutes, mathMission,
+        selectedDays.toList()
+    ) {
+        if (alarm == null || alarm.id == 0L) {
+            val daysString = if (specificDateMillis == null) selectedDays.sorted().joinToString(",") else ""
+            val draft = AlarmEntity(
+                id = 0L,
+                hour = hour,
+                minute = minute,
+                label = label.ifBlank { "Alarme" },
+                daysOfWeek = daysString,
+                vibrate = if (vibrationOnly) true else vibrate,
+                vibrationOnly = vibrationOnly,
+                soundTone = soundTone,
+                snoozeMinutes = snoozeMinutes,
+                mathMission = mathMission,
+                volume = volume,
+                specificDateMillis = specificDateMillis,
+                isEnabled = true
+            )
+            onDraftUpdate?.invoke(draft)
+        }
+    }
+
+    val isRestoredDraft = alarm != null && alarm.id == 0L
+
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
@@ -216,13 +254,61 @@ fun EditAlarmSheet(
                 .padding(bottom = 32.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Text(
-                text = if (alarm == null) "Novo Alarme" else "Editar Alarme",
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurface,
-                modifier = Modifier.padding(bottom = 16.dp)
-            )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 16.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = if (alarm == null || alarm.id == 0L) "Novo Alarme" else "Editar Alarme",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    if (isRestoredDraft) {
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Surface(
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text(
+                                text = "Rascunho",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+                }
+
+                if (isRestoredDraft && onResetDraft != null) {
+                    TextButton(
+                        onClick = {
+                            val cal = Calendar.getInstance()
+                            hour = (cal.get(Calendar.HOUR_OF_DAY) + 1) % 24
+                            minute = 0
+                            label = "Alarme"
+                            volume = 0.8f
+                            specificDateMillis = null
+                            vibrate = true
+                            vibrationOnly = false
+                            soundTone = "gentle"
+                            snoozeMinutes = 10
+                            mathMission = false
+                            selectedDays.clear()
+                            onResetDraft()
+                        }
+                    ) {
+                        Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Limpar", style = MaterialTheme.typography.labelMedium)
+                    }
+                }
+            }
 
             // Time Selector Card
             Card(

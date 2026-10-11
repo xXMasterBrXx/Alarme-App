@@ -47,5 +47,19 @@ class ExampleRobolectricTest {
     val alarm = AlarmEntity(id = 2L, hour = 8, minute = 0, label = "Teste Direto", isEnabled = true)
     AlarmScheduler.triggerAlarmImmediately(context, alarm)
   }
+
+  @Test
+  fun `test alarm draft update and clearing`() {
+    val app = ApplicationProvider.getApplicationContext<android.app.Application>()
+    val viewModel = com.example.ui.alarm.AlarmViewModel(app)
+    val draft = AlarmEntity(hour = 6, minute = 45, label = "Meu Treino")
+    viewModel.updateNewAlarmDraft(draft)
+    assertEquals("Meu Treino", viewModel.newAlarmDraft.value?.label)
+    assertEquals(6, viewModel.newAlarmDraft.value?.hour)
+    assertEquals(45, viewModel.newAlarmDraft.value?.minute)
+
+    viewModel.clearNewAlarmDraft()
+    assertEquals(null, viewModel.newAlarmDraft.value)
+  }
 }
 

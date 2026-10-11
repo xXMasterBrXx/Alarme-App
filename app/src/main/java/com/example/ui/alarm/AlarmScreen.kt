@@ -80,6 +80,7 @@ fun AlarmScreen(
     val context = LocalContext.current
     val atmosphere = LocalTimeAtmosphere.current
     val alarms by viewModel.alarms.collectAsState()
+    val newAlarmDraft by viewModel.newAlarmDraft.collectAsState()
     val nextAlarmInfo = viewModel.getNextUpcomingAlarmInfo(alarms)
 
     var editingAlarm by remember { mutableStateOf<AlarmEntity?>(null) }
@@ -504,10 +505,17 @@ fun AlarmScreen(
 
     if (isAddingNew) {
         EditAlarmSheet(
-            alarm = null,
+            alarm = newAlarmDraft,
+            onDraftUpdate = { draft ->
+                viewModel.updateNewAlarmDraft(draft)
+            },
+            onResetDraft = {
+                viewModel.clearNewAlarmDraft()
+            },
             onDismiss = { isAddingNew = false },
             onSave = {
                 viewModel.saveAlarm(it)
+                viewModel.clearNewAlarmDraft()
                 isAddingNew = false
             }
         )
