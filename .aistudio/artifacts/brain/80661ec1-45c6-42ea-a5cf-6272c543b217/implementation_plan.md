@@ -1,108 +1,113 @@
-# Correção de Toque Único e Soneca pelos Botões Físicos
+# Execução Confiável do Alarme com Aplicativo Fechado
 
-Plano de arquitetura e implementação para assegurar a reprodução exclusiva e sem sobreposição do toque selecionado no alarme, e adicionar a funcionalidade de entrar em modo soneca imediatamente ao pressionar o botão de bloquear/desligar tela ou os botões de volume.
+Plano técnico para garantir que o despertador dispare de forma pontual e confiável mesmo quando o aplicativo estiver totalmente fechado, finalizado na gaveta de recentes ou com a tela desligada.
 
 ---
 
 ### Decisões do Usuário & Alinhamento
 
 > [!IMPORTANT]
-> Decisões confirmadas na etapa anterior de alinhamento com o usuário:
+> Decisões alinhadas na etapa de perguntas:
 
-- **Comportamento dos Botões Físicos**: Tanto o botão de bloquear (Power/Screen Off) quanto os botões de volume (Volume Up/Down) ativarão a soneca do alarme.
-- **Transição ao Bloquear**: O alarme será silenciado instantaneamente e reagendado para o intervalo de soneca configurado, com a tela mantida desligada para preservar a tranquilidade do usuário ao acordar.
-
----
-
-### 1. Visão Geral & Conceito Central
-
-- **O que faz**:
-  1. **Eliminação de Toque Duplo**: Harmoniza os canais de notificação do Android e o motor de áudio dedicado (`AlarmSoundPlayer`). A notificação visual do sistema torna-se silenciosa para evitar que o toque nativo do canal toque em paralelo com o reprodutor customizado, garantindo que apenas o áudio selecionado (suave, digital, ringtone do sistema ou YouTube) seja executado.
-  2. **Controle pelos Botões de Hardware**: Ao tocar o alarme, pressionar a tecla de bloquear/desligar a tela ou as teclas de volume aciona imediatamente o modo soneca, parando o som e reagendando o disparo sem exigir interação tátil na tela.
-- **Público & Cenário**: Usuários acordando sonolentos que preferem silenciar o alarme rapidamente com gestos físicos naturais no aparelho.
-- **Valor Agregado**: Fim da sobreposição cacofônica de dois toques ao mesmo tempo e facilidade imediata de acionamento de soneca às cegas.
+- **Estratégia de Execução em Segundo Plano**: Utilização de **Serviço em Primeiro Plano (Foreground Service)** acionado automaticamente no instante exato do disparo, garantindo que o Android mantenha o processo ativo com WakeLock até que o usuário decida desligar ou adiar.
+- **Experiência do Usuário**: Foco 100% em ajustes técnicos transparentes no código e manifesto (sem necessidade de tutoriais ou telas adicionais de configuração manual).
 
 ---
 
-### 2. Experiência do Usuário & Design Visual
+### 1. Visão Geral & Causa Raiz
 
-- **Fluxo do Alarme com Botões de Volume**:
-  1. O alarme dispara com o som e volume selecionados, acendendo a tela cheia de alarme (`AlarmRingingActivity`).
-  2. O usuário pressiona Volume + ou Volume - no celular.
-  3. A atividade intercepta os eventos de tecla, silencia o reprodutor de áudio e a vibração, agenda a soneca e encerra a tela exibindo feedback claro.
-- **Fluxo do Alarme com Botão de Bloqueio (Power)**:
-  1. O usuário aperta o botão Power para desligar a tela.
-  2. O sistema emite o evento `ACTION_SCREEN_OFF`.
-  3. O receptor dinâmico em `AlarmRingingActivity` detecta o bloqueio imediato, interrompe o motor de som e agenda a soneca, mantendo o telefone em repouso.
-- **Design & Interface**:
-  - Na tela de alarme ativo, um subtítulo informativo com ícone discreto lembrará: *"Pressione o botão de bloquear ou volume para adiar"*.
-  - Feedback visual e tátil com transição suave para evitar sustos sonoros.
+- **Diagnóstico Técnico do Problema Atual**:
+  1. *Ciclo Efêmero do BroadcastReceiver*: Quando o aplicativo é fechado, o sistema operacional encerra seu processo. Ao chegar a hora do alarme, o `AlarmManager` entrega o evento ao `AlarmReceiver`. Contudo, assim que o método `onReceive()` termina (em cerca de 5 a 10 milissegundos), o Android classifica o processo como vazio (*cached/empty process*) e o finaliza sumariamente antes que a reprodução sonora ou a atividade em tela cheia se consolidem.
+  2. *Ausência de Foreground Service Ativo*: O `AlarmService` não estava sendo iniciado como serviço de primeiro plano (`startForegroundService` com `startForeground`), deixando o reprodutor de áudio desprotegido contra o gerenciador de memória do sistema.
+  3. *Compatibilidade com Android 14+*: Serviços em primeiro plano exigem declaração explícita de `android:foregroundServiceType="mediaPlayback"` no `AndroidManifest.xml` e na chamada de `startForeground()`.
+- **Solução Entregue**:
+  - Transformação do `AlarmService` em um Foreground Service de alta prioridade (`mediaPlayback`), imune ao encerramento pelo sistema operacional.
+  - O `AlarmReceiver` delega a execução contínua ao `AlarmService` mantendo WakeLock compartilhado.
+  - A notificação em tela cheia (`fullScreenIntent`) é atrelada diretamente ao ciclo do serviço, garantindo abertura visual e áudio ininterrupto.
+
+---
+
+### 2. Experiência do Usuário & Fluxo de Disparo
+
+```
+App Fechado (Processo Inativo) ──► AlarmManager dispara no minuto exato
+                                            │
+                                            ▼
+                                   AlarmReceiver (WakeLock)
+                                            │
+                                            ▼
+                               ContextCompat.startForegroundService
+                                            │
+                                            ▼
+                                  AlarmService.startForeground
+                               (Notificação Heads-up / Tela Cheia)
+                                            │
+                   ┌────────────────────────┴────────────────────────┐
+                   ▼                                                 ▼
+          Áudio & Vibração Ativos                          AlarmRingingActivity
+         (Processo Blindado pelo SO)                       (Acende Tela Bloqueada)
+```
+
+1. **Repouso**: O app pode estar completamente fechado; o alarme permanece registrado no hardware via `AlarmManager.setAlarmClock()`.
+2. **Disparo**:
+   - O `AlarmReceiver` recebe o sinal do sistema com permissão de despertar (`WAKE_LOCK`).
+   - O `AlarmService` é elevado a Foreground Service imediatamente, exibindo a notificação prioritária e tocando o áudio via `AlarmSoundPlayer`.
+   - A atividade em tela cheia (`AlarmRingingActivity`) assume a tela mesmo que o celular esteja bloqueado.
+3. **Encerramento / Soneca**: Ao desligar ou apertar o botão de bloqueio/volume para adiar, o serviço é finalizado e libera os recursos da CPU.
 
 ---
 
 ### 3. Decisões Técnicas & Trade-Offs
 
-- **Isolamento de Áudio vs Notificação do Android**:
-  - *Abordagem Selecionada*: Criar um canal de notificação dedicado silencioso (`setSound(null, null)` e sem vibração automática do sistema) com prioridade máxima (`IMPORTANCE_HIGH` / `PRIORITY_MAX`).
-  - *Motivo*: No Android 8.0+, canais de notificação com som associado disparam o áudio padrão do sistema automaticamente sempre que a notificação em tela cheia é publicada. Se o app também inicia seu próprio MediaPlayer, dois sons tocam simultaneamente. Tornar o canal silencioso permite que o reprodutor de áudio do app controle 100% da reprodução com o som, volume e vibração exatos escolhidos pelo usuário.
-  - *Alternativas Descartadas*: Deixar a notificação gerenciar o som impediria toques customizados do app, controle fino de volume por alarme e áudio do YouTube.
+- **Foreground Service sob Demanda vs Serviço Persistente Contínuo**:
+  - *Abordagem Selecionada*: Ativação do Foreground Service estritamente no momento do disparo do alarme.
+  - *Vantagem*: Zero consumo de bateria enquanto o alarme aguarda o horário, sem poluir a barra de status com notificações permanentes desnecessárias.
+  - *Conformidade*: O Android 12, 13 e 14 autorizam expressamente a inicialização de Foreground Service a partir do plano de fundo quando disparado por `setAlarmClock()`.
 
-- **Detecção do Botão de Bloqueio (Power)**:
-  - *Abordagem Selecionada*: Registro em tempo de execução de um `BroadcastReceiver` com `IntentFilter(Intent.ACTION_SCREEN_OFF)` durante o ciclo de vida ativo da tela de disparo.
-  - *Motivo*: O Android intencionalmente bloqueia a interceptação direta de `KeyEvent.KEYCODE_POWER` por apps de terceiros por motivos de segurança do SO. Capturar `ACTION_SCREEN_OFF` e o ciclo `onPause`/`onStop` decorrente do clique do botão liga/desliga é a técnica padrão oficial e 100% confiável no ecossistema Android.
+- **Declaração de Tipo de Serviço no AndroidManifest**:
+  - Inclusão de `android:foregroundServiceType="mediaPlayback"` na tag `<service android:name=".alarm.AlarmService" />`.
+  - Atende aos requisitos rigorosos do Android 14 e Google Play sem risco de exceções em tempo de execução.
 
-- **Detecção dos Botões de Volume**:
-  - *Abordagem Selecionada*: Sobrescrita de `dispatchKeyEvent` na `AlarmRingingActivity` capturando `KEYCODE_VOLUME_UP` e `KEYCODE_VOLUME_DOWN`.
-  - *Motivo*: Interceptação imediata antes que o Android altere o volume de mídia ou alarme do aparelho, transformando o clique na ação de adiar.
+- **Gerenciamento de WakeLock e goAsync**:
+  - Utilização de `WakeLock` estático seguro com limite de tempo e liberação estrita pelo `AlarmService` ao finalizar, prevenindo suspensão da CPU por fabricantes agressivos (como Xiaomi, Samsung e Motorola).
 
 ---
 
-### 4. Arquitetura Técnica & Estrutura do Sistema
+### 4. Arquitetura Técnica & Componentes
 
 ```
 ┌────────────────────────────────────────────────────────┐
-│                   Disparo do Alarme                   │
-│                    (AlarmReceiver)                     │
+│                   AlarmScheduler                       │
+│    setAlarmClock(triggerTime, showPendingIntent)       │
+└───────────────────────────┬────────────────────────────┘
+                            │ (Na hora exata)
+                            ▼
+┌────────────────────────────────────────────────────────┐
+│                    AlarmReceiver                       │
+│ - Segura WakeLock estático                             │
+│ - ContextCompat.startForegroundService(AlarmService)   │
+└───────────────────────────┬────────────────────────────┘
+                            │
+                            ▼
+┌────────────────────────────────────────────────────────┐
+│                    AlarmService                        │
+│ - startForeground(id, notification, mediaPlayback)     │
+│ - Inicia AlarmSoundPlayer.play(...)                    │
+│ - Lança AlarmRingingActivity (fullScreenIntent)        │
+│ - Mantém processo vivo até Desligar/Soneca             │
 └───────────────────────────┬────────────────────────────┘
                             │
             ┌───────────────┴───────────────┐
             ▼                               ▼
 ┌───────────────────────┐       ┌───────────────────────┐
-│ Canal Notificação v2  │       │   AlarmSoundPlayer    │
-│  (Som: Mudo/Silente)  │       │ (Toque Único Exato +  │
-│  Prioridade Alta/UI   │       │  Vibração + Volume)   │
-└───────────┬───────────┘       └───────────┬───────────┘
-            │                               │
-            └───────────────┬───────────────┘
-                            ▼
-              ┌───────────────────────────┐
-              │   AlarmRingingActivity    │
-              │ (Tela cheia com controles)│
-              └─────────────┬─────────────┘
-                            │
-         ┌──────────────────┴──────────────────┐
-         ▼                                     ▼
-┌──────────────────┐                  ┌──────────────────┐
-│  Botões Volume   │                  │  Botão Bloqueio  │
-│(dispatchKeyEvent)│                  │(ACTION_SCREEN_OFF│
-└────────┬─────────┘                  └────────┬─────────┘
-         │                                     │
-         └──────────────────┬──────────────────┘
-                            ▼
-               ┌────────────────────────┐
-               │    Ativação Soneca     │
-               │ - Stop Audio/Vibração  │
-               │ - Reagenda alarme      │
-               │ - Fecha Activity       │
-               └────────────────────────┘
+│     Desligar          │       │      Soneca           │
+│ - AlarmService.stop() │       │ - AlarmService.stop() │
+│ - AlarmSoundPlayer    │       │ - Reagenda alarme     │
+└───────────────────────┘       └───────────────────────┘
 ```
 
-#### Mapeamento de Eventos e Estado
-
-1. **Garantia de Toque Único**:
-   - Atualização do canal de notificação para um identificador dedicado silencioso (`chrono_alarm_silent_channel`).
-   - Sincronização centralizada no `AlarmSoundPlayer` para impedir múltiplas instâncias concorrentes de reprodução.
-2. **Ciclo de Hardware na Tela de Toque**:
-   - `onAttachedToWindow` / `onResume`: Registra o listener de `ACTION_SCREEN_OFF`.
-   - `dispatchKeyEvent`: Captura botões de volume (`ACTION_DOWN`) e consome o evento redirecionando para a rotina de soneca.
-   - `onSnoozeAlarm`: Centraliza a interrupção de mídia, o cancelamento da notificação e o agendamento da soneca no `AlarmScheduler`.
+#### Mapeamento de Arquivos e Funções:
+- `AndroidManifest.xml`: Atualização da declaração do `AlarmService` com `foregroundServiceType="mediaPlayback"`.
+- `AlarmService.kt`: Implementação completa de `startForeground`, suporte a Android 14 (`mediaPlayback`), controle de áudio centralizado e parada segura.
+- `AlarmReceiver.kt`: Acionamento imediato do Foreground Service ao receber `ACTION_ALARM_TRIGGER`, garantindo imunidade a encerramento de processo.
+- `AlarmRingingActivity.kt`: Coordenação com o `AlarmService` para que ações de soneca e cancelamento liberem o serviço uniformemente.

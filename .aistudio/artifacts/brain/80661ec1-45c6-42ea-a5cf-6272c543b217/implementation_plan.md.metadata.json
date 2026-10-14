@@ -1,6 +1,6 @@
 {
-  "summary": "Plano de implementação para corrigir a reprodução duplicada de toques e adicionar acionamento de soneca imediata através dos botões físicos de bloquear e de volume.",
-  "updatedAt": "2026-10-14T01:15:59.803156344Z",
+  "summary": "Plano de arquitetura e implementação para assegurar a execução robusta e pontual do alarme mesmo com o aplicativo fechado ou encerrado pelo usuário, através de Foreground Service com prioridade máxima e WakeLock persistente.",
+  "updatedAt": "2026-10-14T01:46:09.094142838Z",
   "requestFeedback": true,
   "userFacing": true
 }
