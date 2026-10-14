@@ -181,6 +181,7 @@ class AlarmRingingActivity : ComponentActivity() {
     private fun executeDismiss() {
         if (isFinishedOrProcessed) return
         isFinishedOrProcessed = true
+        try { AlarmReceiver.releaseStaticWakeLock() } catch (_: Throwable) {}
         try { AlarmSoundPlayer.stop(this) } catch (_: Throwable) {}
         try { AlarmService.stopAlarm(this) } catch (_: Throwable) {}
         try { AlarmOverlayManager.dismissOverlay() } catch (_: Throwable) {}
@@ -194,6 +195,7 @@ class AlarmRingingActivity : ComponentActivity() {
     private fun executeSnooze() {
         if (isFinishedOrProcessed) return
         isFinishedOrProcessed = true
+        try { AlarmReceiver.releaseStaticWakeLock() } catch (_: Throwable) {}
         try { AlarmSoundPlayer.stop(this) } catch (_: Throwable) {}
         try { AlarmService.stopAlarm(this) } catch (_: Throwable) {}
         try { AlarmOverlayManager.dismissOverlay() } catch (_: Throwable) {}

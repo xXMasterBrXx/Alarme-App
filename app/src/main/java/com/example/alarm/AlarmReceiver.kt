@@ -36,7 +36,7 @@ class AlarmReceiver : BroadcastReceiver() {
                         "Chrono:AlarmReceiverStaticWakeLock"
                     )
                 }
-                staticWakeLock?.acquire(60 * 1000L) // 60s até o AlarmService assumir o Foreground
+                staticWakeLock?.acquire(10 * 60 * 1000L) // 10 minutos para garantir áudio mesmo se SO atrasar ForegroundService
             } catch (_: Throwable) {}
         }
 
@@ -182,14 +182,76 @@ class AlarmReceiver : BroadcastReceiver() {
                 }
 
                 AlarmScheduler.ACTION_ALARM_TRIGGER -> {
-                    // 1. Manter a CPU temporariamente acordada enquanto o serviço em primeiro plano inicia
+                    val alarmId = intent.getLongExtra(AlarmScheduler.EXTRA_ALARM_ID, 0L)
+                    val label = intent.getStringExtra(AlarmScheduler.EXTRA_ALARM_LABEL) ?: "Alarme"
+                    val sound = intent.getStringExtra(AlarmScheduler.EXTRA_ALARM_SOUND) ?: "gentle"
+                    val vibrate = intent.getBooleanExtra(AlarmScheduler.EXTRA_ALARM_VIBRATE, true)
+                    val vibrationOnly = intent.getBooleanExtra(AlarmScheduler.EXTRA_ALARM_VIBRATION_ONLY, false)
+                    val math = intent.getBooleanExtra(AlarmScheduler.EXTRA_ALARM_MATH, false)
+                    val snoozeMins = intent.getIntExtra(AlarmScheduler.EXTRA_ALARM_SNOOZE_MINS, 10)
+                    val volume = intent.getFloatExtra(AlarmScheduler.EXTRA_ALARM_VOLUME, 0.8f)
+
+                    // 1. Manter CPU ativa continuamente (com timeout de 10 min por segurança)
                     acquireStaticWakeLock(context)
 
-                    // 2. Iniciar o AlarmService como Foreground Service (garantindo execução mesmo com app fechado)
-                    AlarmService.startAlarm(context, intent)
+                    // 2. Disparar áudio e vibração IMEDIATAMENTE direto pelo Receiver
+                    // Não aguarda o AlarmService, garantindo execução mesmo com app fechado e em aparelhos Xiaomi/MIUI
+                    try {
+                        AlarmSoundPlayer.play(context, sound, vibrate, vibrationOnly, volume)
+                    } catch (t: Throwable) {
+                        Log.e(TAG, "Erro ao iniciar AlarmSoundPlayer no Receiver", t)
+                    }
+
+                    // 3. Exibir notificação em tela cheia com prioridade máxima imediatamente
+                    try {
+                        val notification = buildAlarmNotification(
+                            context = context,
+                            alarmId = alarmId,
+                            label = label,
+                            sound = sound,
+                            vibrate = vibrate,
+                            vibrationOnly = vibrationOnly,
+                            math = math,
+                            snoozeMins = snoozeMins,
+                            volume = volume
+                        )
+                        val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+                        notificationManager?.notify(NOTIFICATION_ID, notification)
+                    } catch (t: Throwable) {
+                        Log.e(TAG, "Erro ao emitir notificação no Receiver", t)
+                    }
+
+                    // 4. Tentar abrir a atividade em tela cheia diretamente (se o SO permitir)
+                    try {
+                        val ringingIntent = Intent(context, AlarmRingingActivity::class.java).apply {
+                            flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                                    Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                                    Intent.FLAG_ACTIVITY_SINGLE_TOP or
+                                    Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
+                            putExtra(AlarmScheduler.EXTRA_ALARM_ID, alarmId)
+                            putExtra(AlarmScheduler.EXTRA_ALARM_LABEL, label)
+                            putExtra(AlarmScheduler.EXTRA_ALARM_SOUND, sound)
+                            putExtra(AlarmScheduler.EXTRA_ALARM_VIBRATE, vibrate)
+                            putExtra(AlarmScheduler.EXTRA_ALARM_VIBRATION_ONLY, vibrationOnly)
+                            putExtra(AlarmScheduler.EXTRA_ALARM_MATH, math)
+                            putExtra(AlarmScheduler.EXTRA_ALARM_SNOOZE_MINS, snoozeMins)
+                            putExtra(AlarmScheduler.EXTRA_ALARM_VOLUME, volume)
+                        }
+                        context.startActivity(ringingIntent)
+                    } catch (_: Throwable) {
+                        // Se a Xiaomi suprimir startActivity em segundo plano, a notificação com fullScreenIntent assegura a tela cheia
+                    }
+
+                    // 5. Acionar o AlarmService como Foreground Service (reforço para manter processo ativo)
+                    try {
+                        AlarmService.startAlarm(context, intent)
+                    } catch (t: Throwable) {
+                        Log.w(TAG, "AlarmService suprimido pelo SO (ex: Xiaomi em segundo plano)", t)
+                    }
                 }
 
                 AlarmScheduler.ACTION_ALARM_DISMISS -> {
+                    releaseStaticWakeLock()
                     val alarmId = intent.getLongExtra(AlarmScheduler.EXTRA_ALARM_ID, 0L)
                     try { AlarmService.stopAlarm(context) } catch (_: Throwable) {}
                     try { AlarmSoundPlayer.stop(context) } catch (_: Throwable) {}
@@ -210,6 +272,7 @@ class AlarmReceiver : BroadcastReceiver() {
                 }
 
                 AlarmScheduler.ACTION_ALARM_SNOOZE -> {
+                    releaseStaticWakeLock()
                     val alarmId = intent.getLongExtra(AlarmScheduler.EXTRA_ALARM_ID, 0L)
                     val label = intent.getStringExtra(AlarmScheduler.EXTRA_ALARM_LABEL) ?: "Alarme"
                     val sound = intent.getStringExtra(AlarmScheduler.EXTRA_ALARM_SOUND) ?: "gentle"
