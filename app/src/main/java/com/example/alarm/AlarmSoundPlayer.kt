@@ -46,6 +46,10 @@ object AlarmSoundPlayer {
     var isPlaying = false
         private set
 
+    @Volatile
+    private var currentPlayingKey: String? = null
+
+    @Synchronized
     fun play(
         context: Context,
         soundTone: String,
@@ -53,9 +57,16 @@ object AlarmSoundPlayer {
         vibrationOnly: Boolean = false,
         volume: Float = 0.8f
     ) {
+        val playKey = "$soundTone|$shouldVibrate|$vibrationOnly|$volume"
+        if (isPlaying && currentPlayingKey == playKey) {
+            Log.d(TAG, "Toque já está em reprodução ativa com a mesma configuração: $playKey")
+            return
+        }
+
         // Interrompe qualquer reprodução anterior ou preview para aplicar as novas configurações
         stop(context)
         isPlaying = true
+        currentPlayingKey = playKey
 
         val targetVolume = volume.coerceIn(0.05f, 1.0f)
         AudioRoutingManager.configureDualAudioOutput(context, targetVolume)
@@ -460,8 +471,10 @@ object AlarmSoundPlayer {
         }
     }
 
+    @Synchronized
     fun stop(context: Context? = null) {
         isPlaying = false
+        currentPlayingKey = null
         YouTubeAudioEngine.stopAlarm()
         stopPreview()
         context?.let { AudioRoutingManager.restoreAudioRouting(it) }

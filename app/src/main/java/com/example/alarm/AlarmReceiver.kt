@@ -21,7 +21,7 @@ import kotlinx.coroutines.launch
 class AlarmReceiver : BroadcastReceiver() {
 
     companion object {
-        const val MASTER_CHANNEL_ID = "chrono_alarm_master_channel_v4"
+        const val MASTER_CHANNEL_ID = "chrono_alarm_master_channel_v5"
         const val NOTIFICATION_ID = 4040
         private const val TAG = "AlarmReceiver"
 
@@ -31,29 +31,18 @@ class AlarmReceiver : BroadcastReceiver() {
                     val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
                         ?: return
 
-                    val defaultSoundUri = try {
-                        RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
-                            ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
-                    } catch (_: Throwable) {
-                        null
-                    }
-
-                    val audioAttrs = AudioAttributes.Builder()
-                        .setUsage(AudioAttributes.USAGE_ALARM)
-                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                        .build()
+                    // Remove canais antigos com som atrelado para evitar sobreposição sonora pelo SO
+                    try { notificationManager.deleteNotificationChannel("alarm_clock_channel_master") } catch (_: Throwable) {}
+                    try { notificationManager.deleteNotificationChannel("chrono_alarm_master_channel_v4") } catch (_: Throwable) {}
 
                     val channel = NotificationChannel(
                         MASTER_CHANNEL_ID,
                         "Disparo de Alarmes Chrono",
                         NotificationManager.IMPORTANCE_HIGH
                     ).apply {
-                        description = "Alertas sonoros, vibração e notificações em tela cheia dos alarmes"
-                        enableVibration(true)
-                        vibrationPattern = longArrayOf(0, 800, 400, 800, 400)
-                        if (defaultSoundUri != null) {
-                            setSound(defaultSoundUri, audioAttrs)
-                        }
+                        description = "Alertas visuais e notificações em tela cheia dos alarmes"
+                        setSound(null, null)
+                        enableVibration(false)
                         lockscreenVisibility = NotificationCompat.VISIBILITY_PUBLIC
                         setBypassDnd(true)
                     }
@@ -276,6 +265,9 @@ class AlarmReceiver : BroadcastReceiver() {
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setOngoing(true)
             .setAutoCancel(false)
+            .setSound(null)
+            .setVibrate(null)
+            .setOnlyAlertOnce(true)
             .setFullScreenIntent(fullScreenPendingIntent, true)
             .setContentIntent(fullScreenPendingIntent)
             .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Desligar", dismissPendingIntent)

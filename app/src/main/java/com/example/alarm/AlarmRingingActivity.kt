@@ -2,11 +2,14 @@ package com.example.alarm
 
 import android.app.KeyguardManager
 import android.app.NotificationManager
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.os.Build
 import android.os.Bundle
 import android.os.PowerManager
+import android.view.KeyEvent
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -76,6 +79,15 @@ import kotlin.random.Random
 class AlarmRingingActivity : ComponentActivity() {
 
     private var activityWakeLock: PowerManager.WakeLock? = null
+    private var isFinishedOrProcessed = false
+
+    private val screenOffReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action == Intent.ACTION_SCREEN_OFF) {
+                executeSnooze()
+            }
+        }
+    }
 
     private var alarmIdState = mutableStateOf(0L)
     private var labelState = mutableStateOf("Despertador")
@@ -114,6 +126,16 @@ class AlarmRingingActivity : ComponentActivity() {
             activityWakeLock?.acquire(10 * 60 * 1000L)
         } catch (_: Throwable) {}
 
+        // Registrar receptor para capturar quando o botão de bloquear/desligar tela for pressionado
+        try {
+            val screenFilter = IntentFilter(Intent.ACTION_SCREEN_OFF)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                registerReceiver(screenOffReceiver, screenFilter, Context.RECEIVER_NOT_EXPORTED)
+            } else {
+                registerReceiver(screenOffReceiver, screenFilter)
+            }
+        } catch (_: Throwable) {}
+
         applyIntent(intent)
 
         setContent {
@@ -127,42 +149,72 @@ class AlarmRingingActivity : ComponentActivity() {
                     vibrationOnly = vibrationOnlyState.value,
                     mathMission = mathState.value,
                     snoozeMinutes = snoozeMinsState.value,
-                    onDismissAlarm = {
-                        try { AlarmSoundPlayer.stop(this) } catch (_: Throwable) {}
-                        try { AlarmService.stopAlarm(this) } catch (_: Throwable) {}
-                        try { AlarmOverlayManager.dismissOverlay() } catch (_: Throwable) {}
-                        try {
-                            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
-                            nm?.cancel(AlarmReceiver.NOTIFICATION_ID)
-                        } catch (_: Throwable) {}
-                        finish()
-                    },
-                    onSnoozeAlarm = {
-                        try { AlarmSoundPlayer.stop(this) } catch (_: Throwable) {}
-                        try { AlarmService.stopAlarm(this) } catch (_: Throwable) {}
-                        try { AlarmOverlayManager.dismissOverlay() } catch (_: Throwable) {}
-                        try {
-                            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
-                            nm?.cancel(AlarmReceiver.NOTIFICATION_ID)
-                        } catch (_: Throwable) {}
-                        try {
-                            AlarmScheduler.scheduleSnooze(
-                                this,
-                                alarmIdState.value,
-                                labelState.value,
-                                soundState.value,
-                                vibrateState.value,
-                                mathState.value,
-                                snoozeMinsState.value,
-                                vibrationOnlyState.value,
-                                volumeState.value
-                            )
-                        } catch (_: Throwable) {}
-                        finish()
-                    }
+                    onDismissAlarm = { executeDismiss() },
+                    onSnoozeAlarm = { executeSnooze() }
                 )
             }
         }
+    }
+
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (event.action == KeyEvent.ACTION_DOWN) {
+            when (event.keyCode) {
+                KeyEvent.KEYCODE_VOLUME_UP,
+                KeyEvent.KEYCODE_VOLUME_DOWN -> {
+                    executeSnooze()
+                    return true
+                }
+            }
+        }
+        return super.dispatchKeyEvent(event)
+    }
+
+    override fun onStop() {
+        super.onStop()
+        // Se a tela desligou (por clique no botão Power/Bloqueio físico), ativa a soneca imediatamente
+        val pm = getSystemService(Context.POWER_SERVICE) as? PowerManager
+        if (pm?.isInteractive == false) {
+            executeSnooze()
+        }
+    }
+
+    private fun executeDismiss() {
+        if (isFinishedOrProcessed) return
+        isFinishedOrProcessed = true
+        try { AlarmSoundPlayer.stop(this) } catch (_: Throwable) {}
+        try { AlarmService.stopAlarm(this) } catch (_: Throwable) {}
+        try { AlarmOverlayManager.dismissOverlay() } catch (_: Throwable) {}
+        try {
+            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+            nm?.cancel(AlarmReceiver.NOTIFICATION_ID)
+        } catch (_: Throwable) {}
+        finish()
+    }
+
+    private fun executeSnooze() {
+        if (isFinishedOrProcessed) return
+        isFinishedOrProcessed = true
+        try { AlarmSoundPlayer.stop(this) } catch (_: Throwable) {}
+        try { AlarmService.stopAlarm(this) } catch (_: Throwable) {}
+        try { AlarmOverlayManager.dismissOverlay() } catch (_: Throwable) {}
+        try {
+            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+            nm?.cancel(AlarmReceiver.NOTIFICATION_ID)
+        } catch (_: Throwable) {}
+        try {
+            AlarmScheduler.scheduleSnooze(
+                this,
+                alarmIdState.value,
+                labelState.value,
+                soundState.value,
+                vibrateState.value,
+                mathState.value,
+                snoozeMinsState.value,
+                vibrationOnlyState.value,
+                volumeState.value
+            )
+        } catch (_: Throwable) {}
+        finish()
     }
 
     override fun onNewIntent(newIntent: Intent) {
@@ -198,6 +250,9 @@ class AlarmRingingActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        try {
+            unregisterReceiver(screenOffReceiver)
+        } catch (_: Throwable) {}
         try {
             if (activityWakeLock?.isHeld == true) {
                 activityWakeLock?.release()
@@ -512,6 +567,34 @@ fun AlarmRingingScreen(
                         Icon(Icons.Default.Snooze, contentDescription = null, modifier = Modifier.size(20.dp))
                         Spacer(modifier = Modifier.width(8.dp))
                         Text("Soneca (+${snoozeMinutes} min)", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                    }
+
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 2.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center,
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Snooze,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "Botão de bloquear ou volume ativa a soneca",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
                     }
                 }
             }
