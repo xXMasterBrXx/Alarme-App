@@ -87,6 +87,7 @@ fun AlarmScreen(
     var isAddingNew by remember { mutableStateOf(false) }
     var alarmToDelete by remember { mutableStateOf<AlarmEntity?>(null) }
     var canDrawOverlays by remember { mutableStateOf(Settings.canDrawOverlays(context)) }
+    val isXiaomi = remember { com.example.alarm.XiaomiDeviceHelper.isXiaomiDevice() }
 
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
         canDrawOverlays = Settings.canDrawOverlays(context)
@@ -99,6 +100,84 @@ fun AlarmScreen(
                 .padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
+            item {
+                Spacer(modifier = Modifier.height(4.dp))
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("xiaomi_permission_banner"),
+                    shape = RoundedCornerShape(20.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.85f)
+                    )
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(42.dp)
+                                    .clip(CircleShape)
+                                    .background(MaterialTheme.colorScheme.tertiary),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.NotificationsActive,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onTertiary,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            }
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = if (isXiaomi) "Permissões Xiaomi / MIUI / HyperOS" else "Garantia com App Fechado",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onTertiaryContainer
+                                )
+                                Text(
+                                    text = "No Xiaomi, ative o Início Automático e Janelas Pop-up para o alarme tocar mesmo ao fechar o app na multitarefa.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.9f)
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(14.dp))
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Button(
+                                onClick = { com.example.alarm.XiaomiDeviceHelper.openAutostartSettings(context) },
+                                shape = RoundedCornerShape(12.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                            ) {
+                                Text("1. Início Automático")
+                            }
+                            Button(
+                                onClick = { com.example.alarm.XiaomiDeviceHelper.openMiuiPermissions(context) },
+                                shape = RoundedCornerShape(12.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)
+                            ) {
+                                Text("2. Janelas Pop-up")
+                            }
+                            OutlinedButton(
+                                onClick = { com.example.alarm.XiaomiDeviceHelper.openBatterySaverSettings(context) },
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Text("3. Bateria Sem Restrições")
+                            }
+                        }
+                    }
+                }
+            }
+
             if (!canDrawOverlays) {
                 item {
                     Spacer(modifier = Modifier.height(4.dp))

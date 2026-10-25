@@ -55,9 +55,10 @@ object AlarmSoundPlayer {
         soundTone: String,
         shouldVibrate: Boolean,
         vibrationOnly: Boolean = false,
-        volume: Float = 0.8f
+        volume: Float = 0.8f,
+        playAudioInPlayer: Boolean = false
     ) {
-        val playKey = "$soundTone|$shouldVibrate|$vibrationOnly|$volume"
+        val playKey = "$soundTone|$shouldVibrate|$vibrationOnly|$volume|$playAudioInPlayer"
         if (isPlaying && currentPlayingKey == playKey) {
             Log.d(TAG, "Toque já está em reprodução ativa com a mesma configuração: $playKey")
             return
@@ -98,7 +99,14 @@ object AlarmSoundPlayer {
             }
         }
 
-        // 4. Iniciar áudio com múltiplas camadas de fallback à prova de falhas
+        // 4. Se o canal de notificação do sistema já reproduz nativamente com FLAG_INSISTENT,
+        // NÃO iniciamos o MediaPlayer aqui para evitar rigorosamente que saiam "dois toques ao mesmo tempo".
+        if (!playAudioInPlayer) {
+            Log.d(TAG, "Áudio sendo reproduzido nativamente pelo NotificationChannel com FLAG_INSISTENT")
+            return
+        }
+
+        // 5. Iniciar áudio com múltiplas camadas de fallback à prova de falhas (apenas se playAudioInPlayer for true)
         startAudioPlayback(context, soundTone, targetVolume, alarmAudioAttrs)
     }
 

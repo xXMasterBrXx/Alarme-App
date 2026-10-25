@@ -1,113 +1,55 @@
-# Execução Confiável do Alarme com Aplicativo Fechado
+# Plano de Correção Definitiva para Alarmes no Xiaomi (MIUI / HyperOS)
 
-Plano técnico para garantir que o despertador dispare de forma pontual e confiável mesmo quando o aplicativo estiver totalmente fechado, finalizado na gaveta de recentes ou com a tela desligada.
-
----
-
-### Decisões do Usuário & Alinhamento
-
-> [!IMPORTANT]
-> Decisões alinhadas na etapa de perguntas:
-
-- **Estratégia de Execução em Segundo Plano**: Utilização de **Serviço em Primeiro Plano (Foreground Service)** acionado automaticamente no instante exato do disparo, garantindo que o Android mantenha o processo ativo com WakeLock até que o usuário decida desligar ou adiar.
-- **Experiência do Usuário**: Foco 100% em ajustes técnicos transparentes no código e manifesto (sem necessidade de tutoriais ou telas adicionais de configuração manual).
+## Contexto e Causa Raiz no Xiaomi
+Ao fechar um aplicativo no Xiaomi (arrastando para cima na tela de recentes), a MIUI / HyperOS aplica um encerramento agressivo (`force-stop`) que suprime `BroadcastReceivers` comuns e restringe processos em segundo plano a menos que:
+1. A permissão de **Início Automático (Autostart)** esteja habilitada nas configurações de segurança da Xiaomi (`com.miui.securitycenter`).
+2. As permissões de **Exibir na tela de bloqueio** e **Exibir janelas pop-up em segundo plano** estejam autorizadas.
+3. O canal de notificação do Android utilize som nativo do sistema com `AudioAttributes.USAGE_ALARM`, garantindo que o próprio subsistema de som do Android (SystemUI / AudioServer) toque o alarme imediatamente, sem depender exclusivamente da inicialização da JVM do aplicativo em segundo plano.
+4. O `AlarmReceiver` esteja configurado com `android:directBootAware="true"` para receber broadcasts de alarme mesmo quando o armazenamento criptografado de credenciais estiver bloqueado.
 
 ---
 
-### 1. Visão Geral & Causa Raiz
+## Proposta de Soluções
 
-- **Diagnóstico Técnico do Problema Atual**:
-  1. *Ciclo Efêmero do BroadcastReceiver*: Quando o aplicativo é fechado, o sistema operacional encerra seu processo. Ao chegar a hora do alarme, o `AlarmManager` entrega o evento ao `AlarmReceiver`. Contudo, assim que o método `onReceive()` termina (em cerca de 5 a 10 milissegundos), o Android classifica o processo como vazio (*cached/empty process*) e o finaliza sumariamente antes que a reprodução sonora ou a atividade em tela cheia se consolidem.
-  2. *Ausência de Foreground Service Ativo*: O `AlarmService` não estava sendo iniciado como serviço de primeiro plano (`startForegroundService` com `startForeground`), deixando o reprodutor de áudio desprotegido contra o gerenciador de memória do sistema.
-  3. *Compatibilidade com Android 14+*: Serviços em primeiro plano exigem declaração explícita de `android:foregroundServiceType="mediaPlayback"` no `AndroidManifest.xml` e na chamada de `startForeground()`.
-- **Solução Entregue**:
-  - Transformação do `AlarmService` em um Foreground Service de alta prioridade (`mediaPlayback`), imune ao encerramento pelo sistema operacional.
-  - O `AlarmReceiver` delega a execução contínua ao `AlarmService` mantendo WakeLock compartilhado.
-  - A notificação em tela cheia (`fullScreenIntent`) é atrelada diretamente ao ciclo do serviço, garantindo abertura visual e áudio ininterrupto.
+### 1. Garantia de Som Nativo no Canal de Notificação sem Som Duplo
+- **Configurar Canal de Notificação com Som Nativo do Alarme**:
+  - Atualizar o canal de notificação mestre (`MASTER_CHANNEL_ID`) para registrar som padrão de alarme (`RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)`) com atributos de áudio `AudioAttributes.USAGE_ALARM` e `CONTENT_TYPE_SONIFICATION`.
+  - Evitar som duplo: Quando o canal de notificação do sistema emitir o som nativo de alerta, sincronizar com o `AlarmSoundPlayer` para que apenas uma fonte de áudio toque ativamente, mantendo o controle de desligar e soneca intacto.
+- **Vibração Nativa no Canal**:
+  - Habilitar padrão de vibração de alta intensidade diretamente no canal de notificação.
 
----
+### 2. Suporte ao Direct Boot Aware e Prioridade no AndroidManifest
+- Adicionar `android:directBootAware="true"` no `AlarmReceiver` para que o sistema Android possa despertá-lo em qualquer estágio de energia e tela desligada.
+- Adicionar declarações de `<queries>` no `AndroidManifest.xml` para as intents da MIUI (`com.miui.securitycenter`), permitindo abrir as telas de configurações de forma confiável no Android 11+ (API 30+).
 
-### 2. Experiência do Usuário & Fluxo de Disparo
-
-```
-App Fechado (Processo Inativo) ──► AlarmManager dispara no minuto exato
-                                            │
-                                            ▼
-                                   AlarmReceiver (WakeLock)
-                                            │
-                                            ▼
-                               ContextCompat.startForegroundService
-                                            │
-                                            ▼
-                                  AlarmService.startForeground
-                               (Notificação Heads-up / Tela Cheia)
-                                            │
-                   ┌────────────────────────┴────────────────────────┐
-                   ▼                                                 ▼
-          Áudio & Vibração Ativos                          AlarmRingingActivity
-         (Processo Blindado pelo SO)                       (Acende Tela Bloqueada)
-```
-
-1. **Repouso**: O app pode estar completamente fechado; o alarme permanece registrado no hardware via `AlarmManager.setAlarmClock()`.
-2. **Disparo**:
-   - O `AlarmReceiver` recebe o sinal do sistema com permissão de despertar (`WAKE_LOCK`).
-   - O `AlarmService` é elevado a Foreground Service imediatamente, exibindo a notificação prioritária e tocando o áudio via `AlarmSoundPlayer`.
-   - A atividade em tela cheia (`AlarmRingingActivity`) assume a tela mesmo que o celular esteja bloqueado.
-3. **Encerramento / Soneca**: Ao desligar ou apertar o botão de bloqueio/volume para adiar, o serviço é finalizado e libera os recursos da CPU.
+### 3. Utilitário de Diagnóstico Xiaomi / MIUI com Acesso Direto em 1 Toque
+- Criar a classe utilitária `XiaomiDeviceHelper`:
+  - Detectar se o dispositivo é Xiaomi / Redmi / Poco (`Build.MANUFACTURER.contains("xiaomi", ignoreCase = true)` ou detecção de MIUI/HyperOS).
+  - Intent para **Início Automático**: invocar `com.miui.permcenter.autostart.AutoStartManagementActivity` ou ação equivalente da MIUI com fallback inteligente para configurações do app.
+  - Intent para **Janelas Pop-up em Segundo Plano e Tela de Bloqueio**: invocar `com.miui.permcenter.permissions.PermissionsEditorActivity` direcionado diretamente ao pacote do app.
+  - Intent para **Bateria sem Restrições**: atalho direto para `Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`.
+- Adicionar na tela de alarmes (`AlarmScreen.kt`):
+  - Um card/banner destacado e moderno quando for detectado dispositivo Xiaomi, permitindo ao usuário abrir as configurações necessárias com 1 toque.
+  - Diálogo explicativo passo a passo ("Configurações Essenciais Xiaomi") orientando a habilitar Início Automático e Janelas Pop-up.
 
 ---
 
-### 3. Decisões Técnicas & Trade-Offs
-
-- **Foreground Service sob Demanda vs Serviço Persistente Contínuo**:
-  - *Abordagem Selecionada*: Ativação do Foreground Service estritamente no momento do disparo do alarme.
-  - *Vantagem*: Zero consumo de bateria enquanto o alarme aguarda o horário, sem poluir a barra de status com notificações permanentes desnecessárias.
-  - *Conformidade*: O Android 12, 13 e 14 autorizam expressamente a inicialização de Foreground Service a partir do plano de fundo quando disparado por `setAlarmClock()`.
-
-- **Declaração de Tipo de Serviço no AndroidManifest**:
-  - Inclusão de `android:foregroundServiceType="mediaPlayback"` na tag `<service android:name=".alarm.AlarmService" />`.
-  - Atende aos requisitos rigorosos do Android 14 e Google Play sem risco de exceções em tempo de execução.
-
-- **Gerenciamento de WakeLock e goAsync**:
-  - Utilização de `WakeLock` estático seguro com limite de tempo e liberação estrita pelo `AlarmService` ao finalizar, prevenindo suspensão da CPU por fabricantes agressivos (como Xiaomi, Samsung e Motorola).
+## Arquivos a Serem Modificados / Criados
+1. `/app/src/main/AndroidManifest.xml`:
+   - Adicionar `android:directBootAware="true"` no `AlarmReceiver`.
+   - Adicionar `<intent>` queries para `com.miui.securitycenter` e intents de autostart.
+2. `/app/src/main/java/com/example/alarm/XiaomiDeviceHelper.kt` (Novo):
+   - Detecção de hardware e métodos seguros para disparar as Intents específicas da MIUI / HyperOS.
+3. `/app/src/main/java/com/example/alarm/AlarmReceiver.kt`:
+   - Configuração de som nativo do sistema no `NotificationChannel` com atributos `USAGE_ALARM`.
+   - Ajuste na coordenação de reprodução sonora entre canal do sistema e `AlarmSoundPlayer`.
+4. `/app/src/main/java/com/example/alarm/AlarmSoundPlayer.kt`:
+   - Garantir liberação e coordenação perfeita de áudio para evitar qualquer som duplo.
+5. `/app/src/main/java/com/example/ui/alarm/AlarmScreen.kt`:
+   - Adicionar o banner/card de otimização Xiaomi com botões de ação rápida para "Início Automático" e "Permissões de Segundo Plano".
 
 ---
 
-### 4. Arquitetura Técnica & Componentes
-
-```
-┌────────────────────────────────────────────────────────┐
-│                   AlarmScheduler                       │
-│    setAlarmClock(triggerTime, showPendingIntent)       │
-└───────────────────────────┬────────────────────────────┘
-                            │ (Na hora exata)
-                            ▼
-┌────────────────────────────────────────────────────────┐
-│                    AlarmReceiver                       │
-│ - Segura WakeLock estático                             │
-│ - ContextCompat.startForegroundService(AlarmService)   │
-└───────────────────────────┬────────────────────────────┘
-                            │
-                            ▼
-┌────────────────────────────────────────────────────────┐
-│                    AlarmService                        │
-│ - startForeground(id, notification, mediaPlayback)     │
-│ - Inicia AlarmSoundPlayer.play(...)                    │
-│ - Lança AlarmRingingActivity (fullScreenIntent)        │
-│ - Mantém processo vivo até Desligar/Soneca             │
-└───────────────────────────┬────────────────────────────┘
-                            │
-            ┌───────────────┴───────────────┐
-            ▼                               ▼
-┌───────────────────────┐       ┌───────────────────────┐
-│     Desligar          │       │      Soneca           │
-│ - AlarmService.stop() │       │ - AlarmService.stop() │
-│ - AlarmSoundPlayer    │       │ - Reagenda alarme     │
-└───────────────────────┘       └───────────────────────┘
-```
-
-#### Mapeamento de Arquivos e Funções:
-- `AndroidManifest.xml`: Atualização da declaração do `AlarmService` com `foregroundServiceType="mediaPlayback"`.
-- `AlarmService.kt`: Implementação completa de `startForeground`, suporte a Android 14 (`mediaPlayback`), controle de áudio centralizado e parada segura.
-- `AlarmReceiver.kt`: Acionamento imediato do Foreground Service ao receber `ACTION_ALARM_TRIGGER`, garantindo imunidade a encerramento de processo.
-- `AlarmRingingActivity.kt`: Coordenação com o `AlarmService` para que ações de soneca e cancelamento liberem o serviço uniformemente.
+## Verificação e Testes
+- Compilar o projeto com `compile_applet` para assegurar ausência de erros de sintaxe ou dependências.
+- Testar o fluxo de abertura das intents da Xiaomi e o comportamento do canal de notificação com atributos de alarme.

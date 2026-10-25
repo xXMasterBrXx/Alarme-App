@@ -108,7 +108,8 @@ class AlarmService : Service() {
 
                 // 3. Tocar áudio e vibração com sistema à prova de falhas
                 try {
-                    AlarmSoundPlayer.play(this, sound, vibrate, vibrationOnly, volume)
+                    val playInPlayer = sound.startsWith("youtube://")
+                    AlarmSoundPlayer.play(this, sound, vibrate, vibrationOnly, volume, playAudioInPlayer = playInPlayer)
                 } catch (t: Throwable) {
                     Log.e(TAG, "Erro ao iniciar AlarmSoundPlayer em AlarmService", t)
                 }

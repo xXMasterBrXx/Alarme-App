@@ -22,6 +22,13 @@
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
 
     <queries>
+        <package android:name="com.miui.securitycenter" />
+        <intent>
+            <action android:name="miui.intent.action.OP_AUTO_START" />
+        </intent>
+        <intent>
+            <action android:name="miui.intent.action.APP_PERM_EDITOR" />
+        </intent>
         <intent>
             <action android:name="android.intent.action.VIEW" />
             <data android:mimeType="application/vnd.android.package-archive" />
@@ -73,9 +80,11 @@
 
         <receiver
             android:name=".alarm.AlarmReceiver"
-            android:exported="true">
-            <intent-filter>
+            android:exported="true"
+            android:directBootAware="true">
+            <intent-filter android:priority="1000">
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
                 <action android:name="com.example.ALARM_TRIGGER" />
                 <action android:name="com.example.ALARM_DISMISS" />
                 <action android:name="com.example.ALARM_SNOOZE" />

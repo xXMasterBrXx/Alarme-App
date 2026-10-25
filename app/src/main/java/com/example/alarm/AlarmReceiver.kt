@@ -7,8 +7,13 @@ import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.media.AudioAttributes
+import android.media.AudioManager
+import android.media.RingtoneManager
+import android.net.Uri
 import android.os.Build
 import android.os.PowerManager
+import android.provider.Settings
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.example.R
@@ -20,7 +25,7 @@ import kotlinx.coroutines.launch
 class AlarmReceiver : BroadcastReceiver() {
 
     companion object {
-        const val MASTER_CHANNEL_ID = "chrono_alarm_master_channel_v5"
+        const val MASTER_CHANNEL_ID = "chrono_alarm_master_channel_v6"
         const val NOTIFICATION_ID = 4040
         private const val TAG = "AlarmReceiver"
 
@@ -49,33 +54,87 @@ class AlarmReceiver : BroadcastReceiver() {
             } catch (_: Throwable) {}
         }
 
-        fun createAlarmNotificationChannel(context: Context) {
-            try {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
-                        ?: return
-
-                    // Remove canais antigos para evitar reprodução dupla pelo sistema operacional
-                    try { notificationManager.deleteNotificationChannel("alarm_clock_channel_master") } catch (_: Throwable) {}
-                    try { notificationManager.deleteNotificationChannel("chrono_alarm_master_channel_v4") } catch (_: Throwable) {}
-
-                    val channel = NotificationChannel(
-                        MASTER_CHANNEL_ID,
-                        "Disparo de Alarmes Chrono",
-                        NotificationManager.IMPORTANCE_HIGH
-                    ).apply {
-                        description = "Alertas visuais e notificações em tela cheia dos alarmes"
-                        setSound(null, null)
-                        enableVibration(false)
-                        lockscreenVisibility = NotificationCompat.VISIBILITY_PUBLIC
-                        setBypassDnd(true)
-                    }
-
-                    notificationManager.createNotificationChannel(channel)
-                }
-            } catch (t: Throwable) {
-                Log.e(TAG, "Erro ao criar canal de notificação", t)
+        fun getSoundUri(context: Context, sound: String): Uri? {
+            if (sound == "silent") return null
+            if (sound.startsWith("youtube://")) return null
+            if (sound == "gentle" || sound == "default" || sound.isBlank()) {
+                return Uri.parse("android.resource://${context.packageName}/${R.raw.alarm_gentle}")
             }
+            if (sound == "digital" || sound == "radar") {
+                return Uri.parse("android.resource://${context.packageName}/${R.raw.alarm_digital}")
+            }
+            if (sound.startsWith("content://") || sound.startsWith("android.resource://")) {
+                return Uri.parse(sound)
+            }
+            return RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
+                ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
+                ?: Settings.System.DEFAULT_ALARM_ALERT_URI
+        }
+
+        fun getOrCreateAlarmChannel(
+            context: Context,
+            sound: String,
+            vibrate: Boolean,
+            vibrationOnly: Boolean
+        ): String {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+                return MASTER_CHANNEL_ID
+            }
+            val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+                ?: return MASTER_CHANNEL_ID
+
+            val isSilent = vibrationOnly || sound == "silent"
+            val isYouTube = sound.startsWith("youtube://")
+            val soundUri = if (isSilent || isYouTube) null else getSoundUri(context, sound)
+
+            val soundKey = when {
+                isSilent -> "silent"
+                isYouTube -> "yt"
+                sound == "gentle" || sound.isBlank() -> "gentle"
+                sound == "digital" -> "digital"
+                else -> "tone_" + sound.hashCode().toString().replace("-", "m")
+            }
+            val channelId = "chrono_channel_v6_${soundKey}_${if (vibrate) "vib" else "novib"}"
+
+            val existing = notificationManager.getNotificationChannel(channelId)
+            if (existing == null) {
+                val alarmAudioAttrs = AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_ALARM)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .build()
+
+                val channel = NotificationChannel(
+                    channelId,
+                    "Disparo de Alarmes Chrono",
+                    NotificationManager.IMPORTANCE_HIGH
+                ).apply {
+                    description = "Alertas visuais e reprodução de som nativo de alta prioridade dos alarmes"
+                    if (soundUri != null) {
+                        setSound(soundUri, alarmAudioAttrs)
+                    } else {
+                        setSound(null, null)
+                    }
+                    enableVibration(vibrate)
+                    if (vibrate) {
+                        vibrationPattern = longArrayOf(0, 800, 400, 800, 400)
+                    }
+                    lockscreenVisibility = NotificationCompat.VISIBILITY_PUBLIC
+                    setBypassDnd(true)
+                }
+                notificationManager.createNotificationChannel(channel)
+            }
+            return channelId
+        }
+
+        fun createAlarmNotificationChannel(context: Context) {
+            getOrCreateAlarmChannel(context, "gentle", vibrate = true, vibrationOnly = false)
+        }
+
+        fun cancelNotification(context: Context) {
+            try {
+                val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+                notificationManager?.cancel(NOTIFICATION_ID)
+            } catch (_: Throwable) {}
         }
 
         fun buildAlarmNotification(
@@ -89,7 +148,7 @@ class AlarmReceiver : BroadcastReceiver() {
             snoozeMins: Int,
             volume: Float
         ): Notification {
-            createAlarmNotificationChannel(context)
+            val channelId = getOrCreateAlarmChannel(context, sound, vibrate, vibrationOnly)
 
             val ringingIntent = Intent(context, AlarmRingingActivity::class.java).apply {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or
@@ -142,7 +201,7 @@ class AlarmReceiver : BroadcastReceiver() {
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
 
-            return NotificationCompat.Builder(context, MASTER_CHANNEL_ID)
+            val builder = NotificationCompat.Builder(context, channelId)
                 .setSmallIcon(R.drawable.ic_alarm_notification)
                 .setContentTitle("⏰ $label")
                 .setContentText("Alarme disparando! Toque para abrir.")
@@ -151,14 +210,15 @@ class AlarmReceiver : BroadcastReceiver() {
                 .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
                 .setOngoing(true)
                 .setAutoCancel(false)
-                .setSound(null)
-                .setVibrate(null)
-                .setOnlyAlertOnce(true)
                 .setFullScreenIntent(fullScreenPendingIntent, true)
                 .setContentIntent(fullScreenPendingIntent)
                 .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Desligar", dismissPendingIntent)
                 .addAction(android.R.drawable.ic_menu_revert, "Soneca (${snoozeMins}m)", snoozePendingIntent)
-                .build()
+
+            val notification = builder.build()
+            // FLAG_INSISTENT: faz o Android SystemUI repetir o toque continuamente até ser cancelado!
+            notification.flags = notification.flags or Notification.FLAG_INSISTENT or Notification.FLAG_ONGOING_EVENT
+            return notification
         }
     }
 
@@ -167,7 +227,8 @@ class AlarmReceiver : BroadcastReceiver() {
 
         try {
             when (action) {
-                Intent.ACTION_BOOT_COMPLETED -> {
+                Intent.ACTION_BOOT_COMPLETED,
+                "android.intent.action.LOCKED_BOOT_COMPLETED" -> {
                     CoroutineScope(Dispatchers.IO).launch {
                         try {
                             val db = AppDatabase.getDatabase(context)
@@ -194,15 +255,19 @@ class AlarmReceiver : BroadcastReceiver() {
                     // 1. Manter CPU ativa continuamente (com timeout de 10 min por segurança)
                     acquireStaticWakeLock(context)
 
-                    // 2. Disparar áudio e vibração IMEDIATAMENTE direto pelo Receiver
-                    // Não aguarda o AlarmService, garantindo execução mesmo com app fechado e em aparelhos Xiaomi/MIUI
+                    // 2. Garantir volume do fluxo de alarme do sistema (STREAM_ALARM)
                     try {
-                        AlarmSoundPlayer.play(context, sound, vibrate, vibrationOnly, volume)
-                    } catch (t: Throwable) {
-                        Log.e(TAG, "Erro ao iniciar AlarmSoundPlayer no Receiver", t)
-                    }
+                        val am = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+                        if (am != null) {
+                            val maxVol = am.getStreamMaxVolume(AudioManager.STREAM_ALARM)
+                            val desiredVol = (maxVol * volume.coerceIn(0.1f, 1.0f)).toInt().coerceIn(1, maxVol)
+                            am.setStreamVolume(AudioManager.STREAM_ALARM, desiredVol, 0)
+                        }
+                    } catch (_: Throwable) {}
 
-                    // 3. Exibir notificação em tela cheia com prioridade máxima imediatamente
+                    // 3. Exibir notificação em primeiro plano com prioridade máxima e som nativo insistente
+                    // O SystemUI do Android toca o som nativamente de forma independente,
+                    // garantindo que toque mesmo se o aplicativo estiver fechado ou suspenso pela Xiaomi
                     try {
                         val notification = buildAlarmNotification(
                             context = context,
@@ -221,7 +286,18 @@ class AlarmReceiver : BroadcastReceiver() {
                         Log.e(TAG, "Erro ao emitir notificação no Receiver", t)
                     }
 
-                    // 4. Tentar abrir a atividade em tela cheia diretamente (se o SO permitir)
+                    // 4. Disparar áudio pelo AlarmSoundPlayer:
+                    // playAudioInPlayer é true APENAS para sons especiais como YouTube,
+                    // pois o canal nativo do Android já executa com perfeição e de forma insistente o toque do alarme,
+                    // impedindo que saia som duplo ("dois toques ao mesmo tempo") e garantindo toque mesmo com app fechado no Xiaomi.
+                    try {
+                        val playInPlayer = sound.startsWith("youtube://")
+                        AlarmSoundPlayer.play(context, sound, vibrate, vibrationOnly, volume, playAudioInPlayer = playInPlayer)
+                    } catch (t: Throwable) {
+                        Log.e(TAG, "Erro ao iniciar AlarmSoundPlayer no Receiver", t)
+                    }
+
+                    // 5. Tentar abrir a atividade em tela cheia diretamente (se o SO permitir)
                     try {
                         val ringingIntent = Intent(context, AlarmRingingActivity::class.java).apply {
                             flags = Intent.FLAG_ACTIVITY_NEW_TASK or
@@ -242,7 +318,7 @@ class AlarmReceiver : BroadcastReceiver() {
                         // Se a Xiaomi suprimir startActivity em segundo plano, a notificação com fullScreenIntent assegura a tela cheia
                     }
 
-                    // 5. Acionar o AlarmService como Foreground Service (reforço para manter processo ativo)
+                    // 6. Acionar o AlarmService como Foreground Service (reforço para manter processo ativo)
                     try {
                         AlarmService.startAlarm(context, intent)
                     } catch (t: Throwable) {
