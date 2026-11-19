@@ -1,6 +1,0 @@
-{
-  "summary":  "Plano de implementação para corrigir em definitivo o funcionamento dos alarmes em dispositivos Xiaomi (MIUI / HyperOS) com o aplicativo fechado (removido dos recentes). Inclui garantia de áudio nativo via canal de notificação do Android (evitando silêncio ou som duplo), configuração de Direct Boot Aware no AndroidManifest, e utilitário com banner e botões de 1 toque para Início Automático e permissões em segundo plano da Xiaomi.",
-  "updatedAt":  "2026-10-25T03:04:01.644477332Z",
-  "requestFeedback":  true,
-  "userFacing":  true
-}

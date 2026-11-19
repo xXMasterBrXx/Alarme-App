@@ -3,6 +3,6 @@
     <item
         android:width="66dp"
         android:height="66dp"
-        android:drawable="@drawable/ic_app_icon_1790992926245"
+        android:drawable="@drawable/ic_app_logo_moon"
         android:gravity="center" />
 </layer-list>

@@ -22,6 +22,6 @@ dependencyResolutionManagement {
   }
 }
 
-rootProject.name = "Chrono Relógio"
+rootProject.name = "Alarme"
 
 include(":app")

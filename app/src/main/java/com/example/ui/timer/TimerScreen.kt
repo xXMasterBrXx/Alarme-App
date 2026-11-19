@@ -94,7 +94,7 @@ fun TimerScreen() {
                 isRunning = false
                 isConfiguring = true
                 showFinishedDialog = true
-                AlarmSoundPlayer.play(context, "birds", true)
+                AlarmSoundPlayer.play(context, "birds", true, playAudioInPlayer = true)
             }
         }
     }
@@ -368,7 +368,7 @@ fun TimerScreen() {
     if (showFinishedDialog) {
         AlertDialog(
             onDismissRequest = {
-                AlarmSoundPlayer.stop()
+                AlarmSoundPlayer.stop(context)
                 showFinishedDialog = false
             },
             title = {
@@ -380,7 +380,7 @@ fun TimerScreen() {
             text = { Text("O temporizador chegou ao fim com sucesso!") },
             confirmButton = {
                 Button(onClick = {
-                    AlarmSoundPlayer.stop()
+                    AlarmSoundPlayer.stop(context)
                     showFinishedDialog = false
                 }) {
                     Text("OK / Parar Alarme")

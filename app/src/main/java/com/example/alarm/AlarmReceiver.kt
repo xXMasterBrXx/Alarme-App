@@ -71,11 +71,17 @@ class AlarmReceiver : BroadcastReceiver() {
                 ?: Settings.System.DEFAULT_ALARM_ALERT_URI
         }
 
+        fun shouldPlayAudioInPlayer(context: Context, sound: String): Boolean {
+            if (sound.startsWith("youtube://")) return true
+            return AudioRoutingManager.checkConnectedDevices(context).isExternalConnected
+        }
+
         fun getOrCreateAlarmChannel(
             context: Context,
             sound: String,
             vibrate: Boolean,
-            vibrationOnly: Boolean
+            vibrationOnly: Boolean,
+            muteChannelSound: Boolean = false
         ): String {
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
                 return MASTER_CHANNEL_ID
@@ -83,7 +89,7 @@ class AlarmReceiver : BroadcastReceiver() {
             val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
                 ?: return MASTER_CHANNEL_ID
 
-            val isSilent = vibrationOnly || sound == "silent"
+            val isSilent = vibrationOnly || sound == "silent" || muteChannelSound
             val isYouTube = sound.startsWith("youtube://")
             val soundUri = if (isSilent || isYouTube) null else getSoundUri(context, sound)
 
@@ -105,7 +111,7 @@ class AlarmReceiver : BroadcastReceiver() {
 
                 val channel = NotificationChannel(
                     channelId,
-                    "Disparo de Alarmes Chrono",
+                    "Disparo de Alarmes",
                     NotificationManager.IMPORTANCE_HIGH
                 ).apply {
                     description = "Alertas visuais e reprodução de som nativo de alta prioridade dos alarmes"
@@ -146,9 +152,16 @@ class AlarmReceiver : BroadcastReceiver() {
             vibrationOnly: Boolean,
             math: Boolean,
             snoozeMins: Int,
-            volume: Float
+            volume: Float,
+            muteChannelSound: Boolean = shouldPlayAudioInPlayer(context, sound)
         ): Notification {
-            val channelId = getOrCreateAlarmChannel(context, sound, vibrate, vibrationOnly)
+            val channelId = getOrCreateAlarmChannel(
+                context = context,
+                sound = sound,
+                vibrate = vibrate,
+                vibrationOnly = vibrationOnly,
+                muteChannelSound = muteChannelSound
+            )
 
             val ringingIntent = Intent(context, AlarmRingingActivity::class.java).apply {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or
@@ -265,9 +278,12 @@ class AlarmReceiver : BroadcastReceiver() {
                         }
                     } catch (_: Throwable) {}
 
-                    // 3. Exibir notificação em primeiro plano com prioridade máxima e som nativo insistente
-                    // O SystemUI do Android toca o som nativamente de forma independente,
-                    // garantindo que toque mesmo se o aplicativo estiver fechado ou suspenso pela Xiaomi
+                    val playInPlayer = shouldPlayAudioInPlayer(context, sound)
+
+                    // 3. Exibir notificação em primeiro plano com prioridade máxima.
+                    // Quando não há fone conectado, o canal nativo toca de forma insistente.
+                    // Quando há fone conectado, o canal fica mudo para que o AlarmSoundPlayer
+                    // force o som exclusivamente no alto-falante do celular (evitando som só no fone ou som duplo).
                     try {
                         val notification = buildAlarmNotification(
                             context = context,
@@ -278,7 +294,8 @@ class AlarmReceiver : BroadcastReceiver() {
                             vibrationOnly = vibrationOnly,
                             math = math,
                             snoozeMins = snoozeMins,
-                            volume = volume
+                            volume = volume,
+                            muteChannelSound = playInPlayer
                         )
                         val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
                         notificationManager?.notify(NOTIFICATION_ID, notification)
@@ -287,11 +304,8 @@ class AlarmReceiver : BroadcastReceiver() {
                     }
 
                     // 4. Disparar áudio pelo AlarmSoundPlayer:
-                    // playAudioInPlayer é true APENAS para sons especiais como YouTube,
-                    // pois o canal nativo do Android já executa com perfeição e de forma insistente o toque do alarme,
-                    // impedindo que saia som duplo ("dois toques ao mesmo tempo") e garantindo toque mesmo com app fechado no Xiaomi.
+                    // playAudioInPlayer é true para YouTube ou quando há fone conectado (forçando alto-falante do celular).
                     try {
-                        val playInPlayer = sound.startsWith("youtube://")
                         AlarmSoundPlayer.play(context, sound, vibrate, vibrationOnly, volume, playAudioInPlayer = playInPlayer)
                     } catch (t: Throwable) {
                         Log.e(TAG, "Erro ao iniciar AlarmSoundPlayer no Receiver", t)

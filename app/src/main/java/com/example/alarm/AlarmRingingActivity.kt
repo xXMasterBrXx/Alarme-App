@@ -247,7 +247,8 @@ class AlarmRingingActivity : ComponentActivity() {
 
         // Garante que o áudio e a vibração reflitam com precisão absoluta as configurações do alarme
         try {
-            AlarmSoundPlayer.play(this, snd, vib, vibOnly, vol)
+            val playInPlayer = AlarmReceiver.shouldPlayAudioInPlayer(this, snd)
+            AlarmSoundPlayer.play(this, snd, vib, vibOnly, vol, playAudioInPlayer = playInPlayer)
         } catch (_: Throwable) {}
     }
 
@@ -355,7 +356,7 @@ fun AlarmRingingScreen(
                                 modifier = Modifier.size(16.dp)
                             )
                             Text(
-                                text = "Áudio duplo: Auto-falante + ${connectedDevices.deviceNames.firstOrNull() ?: "Fones"}",
+                                text = "Tocando no alto-falante do celular (${connectedDevices.deviceNames.firstOrNull() ?: "Fone conectado"})",
                                 style = MaterialTheme.typography.labelMedium,
                                 color = MaterialTheme.colorScheme.onPrimaryContainer,
                                 fontWeight = FontWeight.Bold

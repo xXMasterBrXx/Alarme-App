@@ -49,6 +49,9 @@ object AlarmSoundPlayer {
     @Volatile
     private var currentPlayingKey: String? = null
 
+    @Volatile
+    private var lastAppContext: Context? = null
+
     @Synchronized
     fun play(
         context: Context,
@@ -58,28 +61,41 @@ object AlarmSoundPlayer {
         volume: Float = 0.8f,
         playAudioInPlayer: Boolean = false
     ) {
-        val playKey = "$soundTone|$shouldVibrate|$vibrationOnly|$volume|$playAudioInPlayer"
+        val appCtx = context.applicationContext ?: context
+        lastAppContext = appCtx
+        val isExternalConnected = AudioRoutingManager.checkConnectedDevices(appCtx).isExternalConnected
+        val effectivePlayInPlayer = playAudioInPlayer || isExternalConnected
+
+        val playKey = "$soundTone|$shouldVibrate|$vibrationOnly|$volume|$effectivePlayInPlayer|$isExternalConnected"
         if (isPlaying && currentPlayingKey == playKey) {
             Log.d(TAG, "Toque já está em reprodução ativa com a mesma configuração: $playKey")
             return
         }
 
         // Interrompe qualquer reprodução anterior ou preview para aplicar as novas configurações
-        stop(context)
+        stop(appCtx)
         isPlaying = true
         currentPlayingKey = playKey
 
         val targetVolume = volume.coerceIn(0.05f, 1.0f)
-        AudioRoutingManager.configureDualAudioOutput(context, targetVolume)
+        AudioRoutingManager.configureDualAudioOutput(
+            context = appCtx,
+            volumePercent = targetVolume,
+            forceBuiltInSpeaker = isExternalConnected
+        )
 
-        val alarmAudioAttrs = AudioAttributes.Builder()
+        val vibrationAudioAttrs = AudioAttributes.Builder()
             .setUsage(AudioAttributes.USAGE_ALARM)
             .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
             .build()
 
+        val playbackAudioAttrs = AudioRoutingManager.createAlarmAudioAttributes(
+            forceBuiltInSpeaker = isExternalConnected
+        )
+
         // 1. Iniciar Vibração Contínua somente se solicitado
         if (vibrationOnly || shouldVibrate) {
-            startVibration(context, alarmAudioAttrs)
+            startVibration(appCtx, vibrationAudioAttrs)
         } else {
             try { vibrator?.cancel() } catch (_: Throwable) {}
         }
@@ -94,20 +110,21 @@ object AlarmSoundPlayer {
         if (soundTone.startsWith("youtube://")) {
             val parsed = YouTubeSoundService.parseSoundTone(soundTone)
             if (parsed != null) {
-                YouTubeAudioEngine.playAlarm(context, parsed.first, targetVolume)
+                YouTubeAudioEngine.playAlarm(appCtx, parsed.first, targetVolume)
                 return
             }
         }
 
-        // 4. Se o canal de notificação do sistema já reproduz nativamente com FLAG_INSISTENT,
-        // NÃO iniciamos o MediaPlayer aqui para evitar rigorosamente que saiam "dois toques ao mesmo tempo".
-        if (!playAudioInPlayer) {
+        // 4. Se o canal de notificação do sistema já reproduz nativamente com FLAG_INSISTENT
+        // e NÃO há fone conectado, NÃO iniciamos o MediaPlayer aqui para evitar som duplo.
+        // Quando há fone conectado, o canal nativo é silenciado e tocamos aqui forçando o alto-falante do celular.
+        if (!effectivePlayInPlayer) {
             Log.d(TAG, "Áudio sendo reproduzido nativamente pelo NotificationChannel com FLAG_INSISTENT")
             return
         }
 
-        // 5. Iniciar áudio com múltiplas camadas de fallback à prova de falhas (apenas se playAudioInPlayer for true)
-        startAudioPlayback(context, soundTone, targetVolume, alarmAudioAttrs)
+        // 5. Iniciar áudio com múltiplas camadas de fallback à prova de falhas
+        startAudioPlayback(appCtx, soundTone, targetVolume, playbackAudioAttrs, forceSpeaker = isExternalConnected)
     }
 
     private fun startVibration(context: Context, audioAttrs: AudioAttributes) {
@@ -141,15 +158,16 @@ object AlarmSoundPlayer {
         context: Context,
         soundTone: String,
         targetVolume: Float,
-        alarmAudioAttrs: AudioAttributes
+        alarmAudioAttrs: AudioAttributes,
+        forceSpeaker: Boolean = false
     ) {
         var played = false
 
         // Caso 1: Sons integrados no app (alarm_gentle, alarm_digital)
         if (soundTone == "gentle" || soundTone == "default" || soundTone.isBlank()) {
-            played = playRawResource(context, R.raw.alarm_gentle, targetVolume, alarmAudioAttrs)
+            played = playRawResource(context, R.raw.alarm_gentle, targetVolume, alarmAudioAttrs, forceSpeaker)
         } else if (soundTone == "digital" || soundTone == "radar") {
-            played = playRawResource(context, R.raw.alarm_digital, targetVolume, alarmAudioAttrs)
+            played = playRawResource(context, R.raw.alarm_digital, targetVolume, alarmAudioAttrs, forceSpeaker)
         }
 
         // Caso 2: URI de som selecionado do sistema (content:// ou android.resource://)
@@ -159,6 +177,9 @@ object AlarmSoundPlayer {
                 val mp = MediaPlayer().apply {
                     setDataSource(context, uri)
                     setAudioAttributes(alarmAudioAttrs)
+                    if (forceSpeaker) {
+                        AudioRoutingManager.applyPreferredSpeakerDevice(context, this)
+                    }
                     setVolume(targetVolume, targetVolume)
                     isLooping = true
                     prepare()
@@ -188,7 +209,7 @@ object AlarmSoundPlayer {
             }
         }
 
-        // Caso 3: Fallback padrão do sistema
+        // Caso 3: Fallback padrão do sistema (prioriza MediaPlayer para permitir setPreferredDevice no alto-falante)
         if (!played) {
             try {
                 val systemUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
@@ -196,17 +217,33 @@ object AlarmSoundPlayer {
                     ?: Settings.System.DEFAULT_ALARM_ALERT_URI
 
                 if (systemUri != null) {
-                    val ringtone = RingtoneManager.getRingtone(context, systemUri)
-                    if (ringtone != null) {
-                        ringtone.audioAttributes = alarmAudioAttrs
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                            ringtone.isLooping = true
-                            ringtone.volume = targetVolume
+                    try {
+                        val mp = MediaPlayer().apply {
+                            setDataSource(context, systemUri)
+                            setAudioAttributes(alarmAudioAttrs)
+                            if (forceSpeaker) {
+                                AudioRoutingManager.applyPreferredSpeakerDevice(context, this)
+                            }
+                            setVolume(targetVolume, targetVolume)
+                            isLooping = true
+                            prepare()
+                            start()
                         }
-                        ringtone.play()
-                        activeRingtone = ringtone
+                        mediaPlayer = mp
                         played = true
-                        startRingtoneLoopWatchdog()
+                    } catch (_: Throwable) {
+                        val ringtone = RingtoneManager.getRingtone(context, systemUri)
+                        if (ringtone != null) {
+                            ringtone.audioAttributes = alarmAudioAttrs
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                                ringtone.isLooping = true
+                                ringtone.volume = targetVolume
+                            }
+                            ringtone.play()
+                            activeRingtone = ringtone
+                            played = true
+                            startRingtoneLoopWatchdog()
+                        }
                     }
                 }
             } catch (t: Throwable) {
@@ -216,12 +253,12 @@ object AlarmSoundPlayer {
 
         // Caso 4: Fallback absoluto garantido pelo recurso integrado no APK
         if (!played) {
-            played = playRawResource(context, R.raw.alarm_gentle, targetVolume, alarmAudioAttrs)
+            played = playRawResource(context, R.raw.alarm_gentle, targetVolume, alarmAudioAttrs, forceSpeaker)
         }
 
         // Caso 5: Fallback final de emergência em síntese PCM direta
         if (!played) {
-            playSynthesizedTone(loop = true, volume = targetVolume)
+            playSynthesizedTone(context = context, loop = true, volume = targetVolume, forceSpeaker = forceSpeaker)
         }
     }
 
@@ -229,7 +266,8 @@ object AlarmSoundPlayer {
         context: Context,
         rawResId: Int,
         targetVolume: Float,
-        alarmAudioAttrs: AudioAttributes
+        alarmAudioAttrs: AudioAttributes,
+        forceSpeaker: Boolean = false
     ): Boolean {
         return try {
             val afd = context.resources.openRawResourceFd(rawResId)
@@ -237,6 +275,9 @@ object AlarmSoundPlayer {
                 setAudioAttributes(alarmAudioAttrs)
                 setDataSource(afd.fileDescriptor, afd.startOffset, afd.length)
                 afd.close()
+                if (forceSpeaker) {
+                    AudioRoutingManager.applyPreferredSpeakerDevice(context, this)
+                }
                 setVolume(targetVolume, targetVolume)
                 isLooping = true
                 prepare()
@@ -250,6 +291,9 @@ object AlarmSoundPlayer {
                 val mp = MediaPlayer.create(context, rawResId)
                 if (mp != null) {
                     try { mp.setAudioAttributes(alarmAudioAttrs) } catch (_: Throwable) {}
+                    if (forceSpeaker) {
+                        AudioRoutingManager.applyPreferredSpeakerDevice(context, mp)
+                    }
                     mp.setVolume(targetVolume, targetVolume)
                     mp.isLooping = true
                     mp.start()
@@ -286,13 +330,23 @@ object AlarmSoundPlayer {
         onFinished: () -> Unit = {}
     ) {
         stopPreview()
+        val appCtx = context.applicationContext ?: context
+        lastAppContext = appCtx
         val targetVolume = volume.coerceIn(0.05f, 1.0f)
-        AudioRoutingManager.configureDualAudioOutput(context, targetVolume)
+        val isExternalConnected = AudioRoutingManager.checkConnectedDevices(appCtx).isExternalConnected
+        AudioRoutingManager.configureDualAudioOutput(
+            context = appCtx,
+            volumePercent = targetVolume,
+            forceBuiltInSpeaker = isExternalConnected
+        )
 
         if (uriString.startsWith("youtube://")) {
             val parsed = YouTubeSoundService.parseSoundTone(uriString)
             if (parsed != null) {
-                YouTubeAudioEngine.playPreview(context, parsed.first, targetVolume, durationSeconds = 10) {
+                YouTubeAudioEngine.playPreview(appCtx, parsed.first, targetVolume, durationSeconds = 10) {
+                    if (!isPlaying) {
+                        AudioRoutingManager.restoreAudioRouting(appCtx)
+                    }
                     onFinished()
                 }
                 return
@@ -301,12 +355,12 @@ object AlarmSoundPlayer {
 
         previewJob = CoroutineScope(Dispatchers.Main).launch {
             var isAudioPlaying = false
-            val alarmAttrs = AudioRoutingManager.createDualOutputAudioAttributes()
+            val alarmAttrs = AudioRoutingManager.createAlarmAudioAttributes(forceBuiltInSpeaker = isExternalConnected)
 
             if (uriString == "gentle" || uriString == "default" || uriString.isBlank()) {
-                isAudioPlaying = playPreviewRaw(context, R.raw.alarm_gentle, targetVolume, alarmAttrs)
+                isAudioPlaying = playPreviewRaw(appCtx, R.raw.alarm_gentle, targetVolume, alarmAttrs, isExternalConnected)
             } else if (uriString == "digital" || uriString == "radar") {
-                isAudioPlaying = playPreviewRaw(context, R.raw.alarm_digital, targetVolume, alarmAttrs)
+                isAudioPlaying = playPreviewRaw(appCtx, R.raw.alarm_digital, targetVolume, alarmAttrs, isExternalConnected)
             } else {
                 val uri: Uri? = try {
                     if (uriString.startsWith("content://") || uriString.startsWith("android.resource://")) {
@@ -320,8 +374,11 @@ object AlarmSoundPlayer {
                 if (uri != null) {
                     try {
                         val mp = MediaPlayer().apply {
-                            setDataSource(context, uri)
+                            setDataSource(appCtx, uri)
                             setAudioAttributes(alarmAttrs)
+                            if (isExternalConnected) {
+                                AudioRoutingManager.applyPreferredSpeakerDevice(appCtx, this)
+                            }
                             setVolume(targetVolume, targetVolume)
                             prepare()
                             start()
@@ -330,7 +387,7 @@ object AlarmSoundPlayer {
                         isAudioPlaying = true
                     } catch (_: Throwable) {
                         try {
-                            val ringtone = RingtoneManager.getRingtone(context, uri)
+                            val ringtone = RingtoneManager.getRingtone(appCtx, uri)
                             if (ringtone != null) {
                                 ringtone.audioAttributes = alarmAttrs
                                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
@@ -346,7 +403,7 @@ object AlarmSoundPlayer {
             }
 
             if (!isAudioPlaying) {
-                playPreviewRaw(context, R.raw.alarm_gentle, targetVolume, alarmAttrs)
+                playPreviewRaw(appCtx, R.raw.alarm_gentle, targetVolume, alarmAttrs, isExternalConnected)
             }
 
             delay(3500L)
@@ -359,7 +416,8 @@ object AlarmSoundPlayer {
         context: Context,
         rawResId: Int,
         targetVolume: Float,
-        alarmAudioAttrs: AudioAttributes
+        alarmAudioAttrs: AudioAttributes,
+        forceSpeaker: Boolean = false
     ): Boolean {
         return try {
             val afd = context.resources.openRawResourceFd(rawResId)
@@ -367,6 +425,9 @@ object AlarmSoundPlayer {
                 setAudioAttributes(alarmAudioAttrs)
                 setDataSource(afd.fileDescriptor, afd.startOffset, afd.length)
                 afd.close()
+                if (forceSpeaker) {
+                    AudioRoutingManager.applyPreferredSpeakerDevice(context, this)
+                }
                 setVolume(targetVolume, targetVolume)
                 prepare()
                 start()
@@ -378,6 +439,9 @@ object AlarmSoundPlayer {
                 val mp = MediaPlayer.create(context, rawResId)
                 if (mp != null) {
                     try { mp.setAudioAttributes(alarmAudioAttrs) } catch (_: Throwable) {}
+                    if (forceSpeaker) {
+                        AudioRoutingManager.applyPreferredSpeakerDevice(context, mp)
+                    }
                     mp.setVolume(targetVolume, targetVolume)
                     mp.start()
                     previewMediaPlayer = mp
@@ -412,9 +476,18 @@ object AlarmSoundPlayer {
         } catch (_: Throwable) {} finally {
             previewMediaPlayer = null
         }
+
+        if (!isPlaying) {
+            lastAppContext?.let { AudioRoutingManager.restoreAudioRouting(it) }
+        }
     }
 
-    private fun playSynthesizedTone(loop: Boolean, volume: Float = 0.8f) {
+    private fun playSynthesizedTone(
+        context: Context,
+        loop: Boolean,
+        volume: Float = 0.8f,
+        forceSpeaker: Boolean = false
+    ) {
         synthJob?.cancel()
         synthJob = CoroutineScope(Dispatchers.Default).launch {
             try {
@@ -427,12 +500,7 @@ object AlarmSoundPlayer {
                 ).coerceAtLeast(4096)
 
                 val track = AudioTrack.Builder()
-                    .setAudioAttributes(
-                        AudioAttributes.Builder()
-                            .setUsage(AudioAttributes.USAGE_ALARM)
-                            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                            .build()
-                    )
+                    .setAudioAttributes(AudioRoutingManager.createAlarmAudioAttributes(forceBuiltInSpeaker = forceSpeaker))
                     .setAudioFormat(
                         AudioFormat.Builder()
                             .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
@@ -443,6 +511,10 @@ object AlarmSoundPlayer {
                     .setBufferSizeInBytes(minBuf)
                     .setTransferMode(AudioTrack.MODE_STREAM)
                     .build()
+
+                if (forceSpeaker) {
+                    AudioRoutingManager.applyPreferredSpeakerDevice(context, track)
+                }
 
                 streamingAudioTrack = track
                 track.play()
@@ -481,11 +553,12 @@ object AlarmSoundPlayer {
 
     @Synchronized
     fun stop(context: Context? = null) {
+        val ctx = context?.applicationContext ?: context ?: lastAppContext
         isPlaying = false
         currentPlayingKey = null
         YouTubeAudioEngine.stopAlarm()
         stopPreview()
-        context?.let { AudioRoutingManager.restoreAudioRouting(it) }
+        ctx?.let { AudioRoutingManager.restoreAudioRouting(it) }
 
         vibrationHeartbeatJob?.cancel()
         vibrationHeartbeatJob = null

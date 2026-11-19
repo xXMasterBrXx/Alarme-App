@@ -1,5 +1,5 @@
 {
-  "name": "Chrono Relógio",
+  "name": "Alarme",
   "description": "Aplicativo moderno de relógio e alarme em Material Design 3 com temas dinâmicos que mudam de acordo com o horário do dia (Amanhecer, Dia, Pôr do Sol e Noite), cronômetro, timer e fusos horários.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]

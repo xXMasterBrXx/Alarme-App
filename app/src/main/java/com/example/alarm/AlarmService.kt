@@ -33,7 +33,8 @@ class AlarmService : Service() {
                     val vib = intent.getBooleanExtra(AlarmScheduler.EXTRA_ALARM_VIBRATE, true)
                     val vibOnly = intent.getBooleanExtra(AlarmScheduler.EXTRA_ALARM_VIBRATION_ONLY, false)
                     val vol = intent.getFloatExtra(AlarmScheduler.EXTRA_ALARM_VOLUME, 0.8f)
-                    AlarmSoundPlayer.play(context, snd, vib, vibOnly, vol)
+                    val playInPlayer = AlarmReceiver.shouldPlayAudioInPlayer(context, snd)
+                    AlarmSoundPlayer.play(context, snd, vib, vibOnly, vol, playAudioInPlayer = playInPlayer)
                 } catch (_: Throwable) {}
             }
         }
@@ -80,6 +81,8 @@ class AlarmService : Service() {
                 // 1. Manter CPU ativa continuamente
                 acquireWakeLock()
 
+                val playInPlayer = AlarmReceiver.shouldPlayAudioInPlayer(this, sound)
+
                 // 2. Construir e fixar imediatamente notificação em primeiro plano
                 val notification = AlarmReceiver.buildAlarmNotification(
                     context = this,
@@ -90,7 +93,8 @@ class AlarmService : Service() {
                     vibrationOnly = vibrationOnly,
                     math = math,
                     snoozeMins = snoozeMins,
-                    volume = volume
+                    volume = volume,
+                    muteChannelSound = playInPlayer
                 )
 
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -108,7 +112,6 @@ class AlarmService : Service() {
 
                 // 3. Tocar áudio e vibração com sistema à prova de falhas
                 try {
-                    val playInPlayer = sound.startsWith("youtube://")
                     AlarmSoundPlayer.play(this, sound, vibrate, vibrationOnly, volume, playAudioInPlayer = playInPlayer)
                 } catch (t: Throwable) {
                     Log.e(TAG, "Erro ao iniciar AlarmSoundPlayer em AlarmService", t)
