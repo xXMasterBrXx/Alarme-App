@@ -23,11 +23,8 @@ object AudioRoutingManager {
     private const val TAG = "AudioRoutingManager"
 
     @Volatile
-    private var hasModifiedRouting = false
-    private var previousAudioMode: Int = AudioManager.MODE_NORMAL
-    private var previousSpeakerphoneOn: Boolean = false
-    private var previousBluetoothScoOn: Boolean = false
-    private var previousVoiceCallVolume: Int = -1
+    private var hasSavedMusicVolume = false
+    private var previousMusicVolume: Int = -1
     private var activeFocusRequest: AudioFocusRequest? = null
 
     /**
@@ -123,19 +120,63 @@ object AudioRoutingManager {
     }
 
     /**
+     * Returns the primary connected external headphone/Bluetooth AudioDeviceInfo (API 23+).
+     */
+    fun findExternalOutputDevice(context: Context): AudioDeviceInfo? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return null
+        return try {
+            val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager ?: return null
+            val outputs = audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
+            outputs.firstOrNull { device ->
+                when (device.type) {
+                    AudioDeviceInfo.TYPE_BLUETOOTH_A2DP,
+                    AudioDeviceInfo.TYPE_WIRED_HEADSET,
+                    AudioDeviceInfo.TYPE_WIRED_HEADPHONES,
+                    AudioDeviceInfo.TYPE_USB_HEADSET,
+                    AudioDeviceInfo.TYPE_USB_DEVICE -> true
+                    else -> (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+                            (device.type == AudioDeviceInfo.TYPE_BLE_HEADSET || device.type == AudioDeviceInfo.TYPE_BLE_SPEAKER)) ||
+                            (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P &&
+                                    device.type == AudioDeviceInfo.TYPE_HEARING_AID)
+                }
+            } ?: outputs.firstOrNull { it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO }
+        } catch (_: Throwable) {
+            null
+        }
+    }
+
+    /**
      * Forces a MediaPlayer instance to output through the phone's built-in speaker (API 28+).
      */
-    fun applyPreferredSpeakerDevice(context: Context, mediaPlayer: MediaPlayer) {
+    fun applyPreferredSpeakerDevice(context: Context, mediaPlayer: MediaPlayer): Boolean {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             try {
                 val speaker = findBuiltInSpeaker(context)
                 if (speaker != null) {
-                    mediaPlayer.setPreferredDevice(speaker)
+                    return mediaPlayer.setPreferredDevice(speaker)
                 }
             } catch (t: Throwable) {
-                Log.w(TAG, "Falha ao definir preferredDevice no MediaPlayer", t)
+                Log.w(TAG, "Falha ao definir preferredDevice (speaker) no MediaPlayer", t)
             }
         }
+        return false
+    }
+
+    /**
+     * Forces a MediaPlayer instance to output through the connected external headphone/Bluetooth device (API 28+).
+     */
+    fun applyPreferredExternalDevice(context: Context, mediaPlayer: MediaPlayer): Boolean {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            try {
+                val external = findExternalOutputDevice(context)
+                if (external != null) {
+                    return mediaPlayer.setPreferredDevice(external)
+                }
+            } catch (t: Throwable) {
+                Log.w(TAG, "Falha ao definir preferredDevice (fone) no MediaPlayer", t)
+            }
+        }
+        return false
     }
 
     /**
@@ -155,23 +196,24 @@ object AudioRoutingManager {
     }
 
     /**
-     * Creates AudioAttributes configured for alarm output.
-     * When [forceBuiltInSpeaker] is true (headphones/Bluetooth connected), uses USAGE_VOICE_COMMUNICATION
-     * paired with MODE_IN_COMMUNICATION + setCommunicationDevice(TYPE_BUILTIN_SPEAKER) so Android's
-     * AudioPolicyManager strictly routes audio out of the phone's built-in loudspeaker instead of headphones.
+     * Creates AudioAttributes configured for alarm output on the phone's built-in speaker.
+     * Uses USAGE_ALARM in MODE_NORMAL so it bypasses silent/DND and plays cleanly alongside headphone audio.
      */
     fun createAlarmAudioAttributes(forceBuiltInSpeaker: Boolean = false): AudioAttributes {
-        return if (forceBuiltInSpeaker) {
-            AudioAttributes.Builder()
-                .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
-                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                .build()
-        } else {
-            AudioAttributes.Builder()
-                .setUsage(AudioAttributes.USAGE_ALARM)
-                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                .build()
-        }
+        return AudioAttributes.Builder()
+            .setUsage(AudioAttributes.USAGE_ALARM)
+            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+            .build()
+    }
+
+    /**
+     * Creates AudioAttributes configured for simultaneous output on connected headphones/Bluetooth.
+     */
+    fun createHeadphoneOutputAudioAttributes(): AudioAttributes {
+        return AudioAttributes.Builder()
+            .setUsage(AudioAttributes.USAGE_MEDIA)
+            .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+            .build()
     }
 
     /**
@@ -180,8 +222,9 @@ object AudioRoutingManager {
     fun createDualOutputAudioAttributes(): AudioAttributes = createAlarmAudioAttributes(false)
 
     /**
-     * Enforces audio routing to the phone's built-in speaker when headphones/Bluetooth are connected,
-     * requests exclusive transient audio focus, and sets hardware volumes according to [volumePercent].
+     * Prepares audio streams and focus for simultaneous speaker + headphone output in MODE_NORMAL.
+     * Keeps MODE_NORMAL so both the built-in speaker (USAGE_ALARM) and connected Bluetooth/wired
+     * headphones (USAGE_MEDIA) can play together simultaneously.
      */
     @Synchronized
     fun configureDualAudioOutput(
@@ -193,81 +236,48 @@ object AudioRoutingManager {
             val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager ?: return
             val clampedPercent = volumePercent.coerceIn(0.05f, 1.0f)
 
-            // 1. Pausar músicas/vídeos ativos solicitando foco exclusivo de áudio
-            requestAlarmAudioFocus(audioManager, forceBuiltInSpeaker)
+            // 1. Garante MODE_NORMAL para permitir reprodução simultânea no alto-falante e no fone/Bluetooth
+            try {
+                if (audioManager.mode != AudioManager.MODE_NORMAL) {
+                    audioManager.mode = AudioManager.MODE_NORMAL
+                }
+            } catch (_: Throwable) {}
 
-            // 2. Ajustar volume do fluxo de alarme
+            // 2. Pausar músicas/vídeos ativos solicitando foco exclusivo de áudio
+            requestAlarmAudioFocus(audioManager)
+
+            // 3. Ajustar volume do fluxo de alarme (alto-falante do celular)
             try {
                 val maxAlarmVol = audioManager.getStreamMaxVolume(AudioManager.STREAM_ALARM)
                 val desiredStreamVol = kotlin.math.round(maxAlarmVol * clampedPercent).toInt().coerceIn(1, maxAlarmVol)
                 audioManager.setStreamVolume(AudioManager.STREAM_ALARM, desiredStreamVol, 0)
             } catch (_: Throwable) {}
 
-            // 3. Se fone de ouvido (com fio, USB ou Bluetooth) estiver conectado,
-            // força o roteamento de hardware diretamente para o alto-falante embutido do celular
+            // 4. Se houver fone conectado, ajustar também o volume do fluxo de mídia para que o toque saia audível no fone
+            // (salvando o volume original para restaurar ao desligar/adiar o alarme)
             if (forceBuiltInSpeaker) {
-                if (!hasModifiedRouting) {
-                    previousAudioMode = audioManager.mode
-                    @Suppress("DEPRECATION")
-                    previousSpeakerphoneOn = audioManager.isSpeakerphoneOn
-                    @Suppress("DEPRECATION")
-                    previousBluetoothScoOn = audioManager.isBluetoothScoOn
-                    previousVoiceCallVolume = try {
-                        audioManager.getStreamVolume(AudioManager.STREAM_VOICE_CALL)
-                    } catch (_: Throwable) { -1 }
-                    hasModifiedRouting = true
-                }
-
                 try {
-                    audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
-                } catch (t: Throwable) {
-                    Log.w(TAG, "Falha ao definir MODE_IN_COMMUNICATION", t)
-                }
-
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                    try {
-                        val speakerCommDevice = audioManager.availableCommunicationDevices
-                            .firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }
-                            ?: findBuiltInSpeaker(context)
-                        if (speakerCommDevice != null) {
-                            audioManager.setCommunicationDevice(speakerCommDevice)
-                        }
-                    } catch (t: Throwable) {
-                        Log.w(TAG, "Falha em setCommunicationDevice, usando fallback isSpeakerphoneOn", t)
-                        enableLegacySpeakerphone(audioManager)
+                    if (!hasSavedMusicVolume) {
+                        previousMusicVolume = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
+                        hasSavedMusicVolume = true
                     }
-                } else {
-                    enableLegacySpeakerphone(audioManager)
-                }
-
-                // Garante volume audível no fluxo de viva-voz enquanto o alarme toca no alto-falante
-                try {
-                    val maxVoiceVol = audioManager.getStreamMaxVolume(AudioManager.STREAM_VOICE_CALL)
-                    val desiredVoiceVol = kotlin.math.round(maxVoiceVol * clampedPercent).toInt().coerceIn(1, maxVoiceVol)
-                    audioManager.setStreamVolume(AudioManager.STREAM_VOICE_CALL, desiredVoiceVol, 0)
+                    val maxMusicVol = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+                    val desiredMusicVol = kotlin.math.round(maxMusicVol * clampedPercent).toInt().coerceIn(1, maxMusicVol)
+                    audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, desiredMusicVol, 0)
                 } catch (_: Throwable) {}
             }
         } catch (t: Throwable) {
-            Log.e(TAG, "Erro ao configurar roteamento de áudio", t)
+            Log.e(TAG, "Erro ao configurar roteamento de áudio duplo", t)
         }
     }
 
-    @Suppress("DEPRECATION")
-    private fun enableLegacySpeakerphone(audioManager: AudioManager) {
-        try {
-            audioManager.stopBluetoothSco()
-            audioManager.isBluetoothScoOn = false
-            audioManager.isSpeakerphoneOn = true
-        } catch (_: Throwable) {}
-    }
-
-    private fun requestAlarmAudioFocus(audioManager: AudioManager, forceBuiltInSpeaker: Boolean) {
+    private fun requestAlarmAudioFocus(audioManager: AudioManager) {
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 activeFocusRequest?.let {
                     try { audioManager.abandonAudioFocusRequest(it) } catch (_: Throwable) {}
                 }
-                val attrs = createAlarmAudioAttributes(forceBuiltInSpeaker)
+                val attrs = createAlarmAudioAttributes(false)
                 val req = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE)
                     .setAudioAttributes(attrs)
                     .setAcceptsDelayedFocusGain(false)
@@ -279,7 +289,7 @@ object AudioRoutingManager {
                 @Suppress("DEPRECATION")
                 audioManager.requestAudioFocus(
                     null,
-                    if (forceBuiltInSpeaker) AudioManager.STREAM_VOICE_CALL else AudioManager.STREAM_ALARM,
+                    AudioManager.STREAM_ALARM,
                     AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE
                 )
             }
@@ -287,7 +297,7 @@ object AudioRoutingManager {
     }
 
     /**
-     * Restores original audio routing, speakerphone state, voice volume, and audio focus when the alarm stops.
+     * Restores original music stream volume and audio focus when the alarm stops.
      */
     @Synchronized
     fun restoreAudioRouting(context: Context) {
@@ -304,31 +314,12 @@ object AudioRoutingManager {
                 audioManager.abandonAudioFocus(null)
             }
 
-            if (hasModifiedRouting) {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                    try {
-                        audioManager.clearCommunicationDevice()
-                    } catch (_: Throwable) {}
-                }
-
-                @Suppress("DEPRECATION")
+            if (hasSavedMusicVolume && previousMusicVolume >= 0) {
                 try {
-                    audioManager.isSpeakerphoneOn = previousSpeakerphoneOn
-                    audioManager.isBluetoothScoOn = previousBluetoothScoOn
+                    audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, previousMusicVolume, 0)
                 } catch (_: Throwable) {}
-
-                try {
-                    audioManager.mode = previousAudioMode
-                } catch (_: Throwable) {}
-
-                if (previousVoiceCallVolume >= 0) {
-                    try {
-                        audioManager.setStreamVolume(AudioManager.STREAM_VOICE_CALL, previousVoiceCallVolume, 0)
-                    } catch (_: Throwable) {}
-                }
-
-                hasModifiedRouting = false
-                previousVoiceCallVolume = -1
+                hasSavedMusicVolume = false
+                previousMusicVolume = -1
             }
         } catch (t: Throwable) {
             Log.w(TAG, "Erro ao restaurar roteamento de áudio", t)

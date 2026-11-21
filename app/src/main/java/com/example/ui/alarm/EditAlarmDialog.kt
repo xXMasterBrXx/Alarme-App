@@ -1,6 +1,7 @@
 package com.example.ui.alarm
 
 import android.app.Activity
+import android.content.Context
 import android.content.Intent
 import android.media.RingtoneManager
 import android.net.Uri
@@ -91,6 +92,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -135,6 +138,11 @@ fun EditAlarmSheet(
 
     YouTubeAudioHost()
 
+    val prefs = remember { context.getSharedPreferences("chrono_prefs", Context.MODE_PRIVATE) }
+    val lastSelectedTone = remember {
+        prefs.getString("last_selected_sound_tone", null)?.takeIf { it.isNotBlank() } ?: "gentle"
+    }
+
     val defaultHour = remember {
         val cal = Calendar.getInstance()
         (cal.get(Calendar.HOUR_OF_DAY) + 1) % 24
@@ -142,18 +150,26 @@ fun EditAlarmSheet(
     var hour by remember { mutableIntStateOf(alarm?.hour ?: defaultHour) }
     var minute by remember { mutableIntStateOf(alarm?.minute ?: 0) }
     var label by remember { mutableStateOf(alarm?.label ?: "Alarme") }
-    var volume by remember { mutableFloatStateOf(alarm?.volume ?: 0.8f) }
+    var volume by remember { mutableFloatStateOf(alarm?.volume ?: 0.5f) }
     var specificDateMillis by remember { mutableStateOf<Long?>(alarm?.specificDateMillis) }
     var vibrate by remember { mutableStateOf(alarm?.vibrate ?: true) }
     var vibrationOnly by remember { mutableStateOf(alarm?.vibrationOnly ?: false) }
-    var soundTone by remember { mutableStateOf(alarm?.soundTone?.ifBlank { "gentle" } ?: "gentle") }
-    var snoozeMinutes by remember { mutableIntStateOf(alarm?.snoozeMinutes ?: 10) }
+    var soundTone by remember { mutableStateOf(alarm?.soundTone?.ifBlank { lastSelectedTone } ?: lastSelectedTone) }
+    var snoozeMinutes by remember { mutableIntStateOf(alarm?.snoozeMinutes ?: 5) }
     var mathMission by remember { mutableStateOf(alarm?.mathMission ?: false) }
+
+    fun selectSoundTone(newTone: String) {
+        soundTone = newTone
+        if (newTone.isNotBlank()) {
+            prefs.edit().putString("last_selected_sound_tone", newTone).apply()
+        }
+    }
 
     var previewingTone by remember { mutableStateOf<String?>(null) }
     var showSoundsDialog by remember { mutableStateOf(false) }
     var showDatePickerDialog by remember { mutableStateOf(false) }
     var showManualTimeInput by remember { mutableStateOf(false) }
+    var initialTimeFocusMinute by remember { mutableStateOf(false) }
     var manualHourText by remember { mutableStateOf("") }
     var manualMinuteText by remember { mutableStateOf("") }
 
@@ -177,7 +193,7 @@ fun EditAlarmSheet(
                 result.data?.getParcelableExtra(RingtoneManager.EXTRA_RINGTONE_PICKED_URI)
             }
             val selectedUri = uri?.toString() ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)?.toString() ?: "default"
-            soundTone = selectedUri
+            selectSoundTone(selectedUri)
             previewingTone = selectedUri
             AlarmSoundPlayer.playPreview(context, selectedUri, volume) {
                 if (previewingTone == selectedUri) {
@@ -292,12 +308,12 @@ fun EditAlarmSheet(
                             hour = (cal.get(Calendar.HOUR_OF_DAY) + 1) % 24
                             minute = 0
                             label = "Alarme"
-                            volume = 0.8f
+                            volume = 0.5f
                             specificDateMillis = null
                             vibrate = true
                             vibrationOnly = false
-                            soundTone = "gentle"
-                            snoozeMinutes = 10
+                            soundTone = prefs.getString("last_selected_sound_tone", null)?.takeIf { it.isNotBlank() } ?: "gentle"
+                            snoozeMinutes = 5
                             mathMission = false
                             selectedDays.clear()
                             onResetDraft()
@@ -344,8 +360,9 @@ fun EditAlarmSheet(
                                     .testTag("alarm_hour_text")
                                     .clip(RoundedCornerShape(8.dp))
                                     .clickable {
-                                        manualHourText = String.format("%02d", hour)
-                                        manualMinuteText = String.format("%02d", minute)
+                                        manualHourText = ""
+                                        manualMinuteText = ""
+                                        initialTimeFocusMinute = false
                                         showManualTimeInput = true
                                     }
                             )
@@ -382,8 +399,9 @@ fun EditAlarmSheet(
                                     .testTag("alarm_minute_text")
                                     .clip(RoundedCornerShape(8.dp))
                                     .clickable {
-                                        manualHourText = String.format("%02d", hour)
-                                        manualMinuteText = String.format("%02d", minute)
+                                        manualHourText = ""
+                                        manualMinuteText = ""
+                                        initialTimeFocusMinute = true
                                         showManualTimeInput = true
                                     }
                             )
@@ -426,8 +444,9 @@ fun EditAlarmSheet(
                         Spacer(modifier = Modifier.width(4.dp))
                         IconButton(
                             onClick = {
-                                manualHourText = String.format("%02d", hour)
-                                manualMinuteText = String.format("%02d", minute)
+                                manualHourText = ""
+                                manualMinuteText = ""
+                                initialTimeFocusMinute = false
                                 showManualTimeInput = true
                             },
                             modifier = Modifier.size(36.dp)
@@ -444,55 +463,124 @@ fun EditAlarmSheet(
             }
 
             if (showManualTimeInput) {
+                val hourFocusRequester = remember { FocusRequester() }
+                val minuteFocusRequester = remember { FocusRequester() }
+
+                val confirmManualTime = {
+                    val h = manualHourText.toIntOrNull() ?: hour
+                    val m = manualMinuteText.toIntOrNull() ?: minute
+                    hour = h.coerceIn(0, 23)
+                    minute = m.coerceIn(0, 59)
+                    showManualTimeInput = false
+                }
+
+                LaunchedEffect(showManualTimeInput) {
+                    try {
+                        if (initialTimeFocusMinute) {
+                            minuteFocusRequester.requestFocus()
+                        } else {
+                            hourFocusRequester.requestFocus()
+                        }
+                        keyboardController?.show()
+                    } catch (_: Throwable) {}
+                }
+
                 AlertDialog(
                     onDismissRequest = { showManualTimeInput = false },
                     title = { Text("Definir Horário Exato") },
                     text = {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.Center,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            OutlinedTextField(
-                                value = manualHourText,
-                                onValueChange = { input ->
-                                    val filtered = input.filter { it.isDigit() }.take(2)
-                                    manualHourText = filtered
-                                },
-                                label = { Text("Hora (0-23)") },
-                                modifier = Modifier.width(105.dp),
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                singleLine = true
-                            )
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Text(
-                                text = ":",
-                                fontSize = 28.sp,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier.padding(horizontal = 8.dp)
+                                text = "Digite o novo horário diretamente",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(bottom = 12.dp)
                             )
-                            OutlinedTextField(
-                                value = manualMinuteText,
-                                onValueChange = { input ->
-                                    val filtered = input.filter { it.isDigit() }.take(2)
-                                    manualMinuteText = filtered
-                                },
-                                label = { Text("Minuto (0-59)") },
-                                modifier = Modifier.width(105.dp),
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                singleLine = true
-                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                OutlinedTextField(
+                                    value = manualHourText,
+                                    onValueChange = { input ->
+                                        val digits = input.filter { it.isDigit() }
+                                        val updated = when {
+                                            digits.length <= 2 -> digits
+                                            manualHourText.length == 2 && digits.startsWith(manualHourText) -> digits.last().toString()
+                                            manualHourText.length == 2 && digits.endsWith(manualHourText) -> digits.first().toString()
+                                            else -> digits.takeLast(2)
+                                        }
+                                        manualHourText = updated
+                                        if (updated.length == 2) {
+                                            try { minuteFocusRequester.requestFocus() } catch (_: Throwable) {}
+                                        }
+                                    },
+                                    label = { Text("Hora") },
+                                    placeholder = {
+                                        Text(
+                                            text = String.format("%02d", hour),
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f)
+                                        )
+                                    },
+                                    modifier = Modifier
+                                        .width(105.dp)
+                                        .focusRequester(hourFocusRequester)
+                                        .testTag("manual_hour_input"),
+                                    keyboardOptions = KeyboardOptions(
+                                        keyboardType = KeyboardType.Number,
+                                        imeAction = ImeAction.Next
+                                    ),
+                                    keyboardActions = KeyboardActions(
+                                        onNext = {
+                                            try { minuteFocusRequester.requestFocus() } catch (_: Throwable) {}
+                                        }
+                                    ),
+                                    singleLine = true
+                                )
+                                Text(
+                                    text = ":",
+                                    fontSize = 28.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 8.dp)
+                                )
+                                OutlinedTextField(
+                                    value = manualMinuteText,
+                                    onValueChange = { input ->
+                                        val digits = input.filter { it.isDigit() }
+                                        val updated = when {
+                                            digits.length <= 2 -> digits
+                                            manualMinuteText.length == 2 && digits.startsWith(manualMinuteText) -> digits.last().toString()
+                                            manualMinuteText.length == 2 && digits.endsWith(manualMinuteText) -> digits.first().toString()
+                                            else -> digits.takeLast(2)
+                                        }
+                                        manualMinuteText = updated
+                                    },
+                                    label = { Text("Minuto") },
+                                    placeholder = {
+                                        Text(
+                                            text = String.format("%02d", minute),
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f)
+                                        )
+                                    },
+                                    modifier = Modifier
+                                        .width(105.dp)
+                                        .focusRequester(minuteFocusRequester)
+                                        .testTag("manual_minute_input"),
+                                    keyboardOptions = KeyboardOptions(
+                                        keyboardType = KeyboardType.Number,
+                                        imeAction = ImeAction.Done
+                                    ),
+                                    keyboardActions = KeyboardActions(
+                                        onDone = { confirmManualTime() }
+                                    ),
+                                    singleLine = true
+                                )
+                            }
                         }
                     },
                     confirmButton = {
-                        Button(
-                            onClick = {
-                                val h = manualHourText.toIntOrNull() ?: hour
-                                val m = manualMinuteText.toIntOrNull() ?: minute
-                                hour = h.coerceIn(0, 23)
-                                minute = m.coerceIn(0, 59)
-                                showManualTimeInput = false
-                            }
-                        ) {
+                        Button(onClick = confirmManualTime) {
                             Text("Confirmar")
                         }
                     },
@@ -1177,7 +1265,7 @@ fun EditAlarmSheet(
                                             else Color.Transparent
                                         )
                                         .clickable {
-                                            soundTone = tone.uriString
+                                            selectSoundTone(tone.uriString)
                                             previewingTone = tone.uriString
                                             AlarmSoundPlayer.playPreview(context, tone.uriString, volume) {
                                                 if (previewingTone == tone.uriString) {
@@ -1192,7 +1280,7 @@ fun EditAlarmSheet(
                                     RadioButton(
                                         selected = isSelected,
                                         onClick = {
-                                            soundTone = tone.uriString
+                                            selectSoundTone(tone.uriString)
                                             previewingTone = tone.uriString
                                             AlarmSoundPlayer.playPreview(context, tone.uriString, volume) {
                                                 if (previewingTone == tone.uriString) {
@@ -1381,7 +1469,7 @@ fun EditAlarmSheet(
                                                 .clickable {
                                                     keyboardController?.hide()
                                                     focusManager.clearFocus()
-                                                    soundTone = encodedTone
+                                                    selectSoundTone(encodedTone)
                                                     previewingTone = encodedTone
                                                     AlarmSoundPlayer.playPreview(context, encodedTone, volume) {
                                                         if (previewingTone == encodedTone) {
@@ -1457,7 +1545,7 @@ fun EditAlarmSheet(
                                                             previewingTone = null
                                                         } else {
                                                             previewingTone = encodedTone
-                                                            soundTone = encodedTone
+                                                            selectSoundTone(encodedTone)
                                                             AlarmSoundPlayer.playPreview(context, encodedTone, volume) {
                                                                 if (previewingTone == encodedTone) {
                                                                     previewingTone = null

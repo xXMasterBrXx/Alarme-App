@@ -19,10 +19,10 @@ data class AlarmEntity(
     val daysOfWeek: String = "",
     val vibrate: Boolean = true,
     val vibrationOnly: Boolean = false,
-    val snoozeMinutes: Int = 10,
+    val snoozeMinutes: Int = 5,
     val soundTone: String = "gentle", // gentle, radar, birds, classic, cosmic
     val mathMission: Boolean = false,
-    val volume: Float = 0.8f, // 0.1f .. 1.0f
+    val volume: Float = 0.5f, // 0.1f .. 1.0f
     val specificDateMillis: Long? = null // Specific calendar date if selected
 ) {
     fun getFormattedTime(): String {

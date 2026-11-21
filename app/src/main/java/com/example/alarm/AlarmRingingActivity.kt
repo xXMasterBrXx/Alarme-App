@@ -356,7 +356,7 @@ fun AlarmRingingScreen(
                                 modifier = Modifier.size(16.dp)
                             )
                             Text(
-                                text = "Tocando no alto-falante do celular (${connectedDevices.deviceNames.firstOrNull() ?: "Fone conectado"})",
+                                text = "Tocando no celular e no fone (${connectedDevices.deviceNames.firstOrNull() ?: "Fone conectado"})",
                                 style = MaterialTheme.typography.labelMedium,
                                 color = MaterialTheme.colorScheme.onPrimaryContainer,
                                 fontWeight = FontWeight.Bold

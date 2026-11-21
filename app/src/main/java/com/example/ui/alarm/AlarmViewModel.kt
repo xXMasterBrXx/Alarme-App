@@ -95,6 +95,10 @@ class AlarmViewModel(application: Application) : AndroidViewModel(application) {
 
     fun saveAlarm(alarm: AlarmEntity) {
         viewModelScope.launch {
+            if (alarm.soundTone.isNotBlank()) {
+                val prefs = getApplication<Application>().getSharedPreferences("chrono_prefs", Context.MODE_PRIVATE)
+                prefs.edit().putString("last_selected_sound_tone", alarm.soundTone).apply()
+            }
             if (alarm.id == 0L) {
                 clearNewAlarmDraft()
                 val newId = alarmDao.insertAlarm(alarm)
