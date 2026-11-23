@@ -8,9 +8,16 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.os.PowerManager
 import android.view.KeyEvent
 import android.view.WindowManager
+import com.example.data.local.AppDatabase
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import java.lang.ref.WeakReference
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -78,6 +85,29 @@ import kotlin.random.Random
 
 class AlarmRingingActivity : ComponentActivity() {
 
+    companion object {
+        const val ACTION_CLOSE_RINGING_UI = "com.example.ACTION_CLOSE_RINGING_UI"
+
+        @Volatile
+        private var activeInstance: WeakReference<AlarmRingingActivity>? = null
+
+        fun finishIfActive(context: Context? = null) {
+            Handler(Looper.getMainLooper()).post {
+                try {
+                    activeInstance?.get()?.finishSilently()
+                } catch (_: Throwable) {}
+            }
+            if (context != null) {
+                try {
+                    val closeIntent = Intent(ACTION_CLOSE_RINGING_UI).apply {
+                        setPackage(context.packageName)
+                    }
+                    context.sendBroadcast(closeIntent)
+                } catch (_: Throwable) {}
+            }
+        }
+    }
+
     private var activityWakeLock: PowerManager.WakeLock? = null
     private var isFinishedOrProcessed = false
 
@@ -89,17 +119,26 @@ class AlarmRingingActivity : ComponentActivity() {
         }
     }
 
+    private val closeUiReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action == ACTION_CLOSE_RINGING_UI) {
+                finishSilently()
+            }
+        }
+    }
+
     private var alarmIdState = mutableStateOf(0L)
     private var labelState = mutableStateOf("Despertador")
     private var soundState = mutableStateOf("gentle")
     private var vibrateState = mutableStateOf(true)
     private var vibrationOnlyState = mutableStateOf(false)
     private var mathState = mutableStateOf(false)
-    private var snoozeMinsState = mutableStateOf(10)
-    private var volumeState = mutableStateOf(0.8f)
+    private var snoozeMinsState = mutableStateOf(5)
+    private var volumeState = mutableStateOf(0.5f)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        activeInstance = WeakReference(this)
         enableEdgeToEdge()
 
         // Turn screen on and show over lockscreen
@@ -133,6 +172,16 @@ class AlarmRingingActivity : ComponentActivity() {
                 registerReceiver(screenOffReceiver, screenFilter, Context.RECEIVER_NOT_EXPORTED)
             } else {
                 registerReceiver(screenOffReceiver, screenFilter)
+            }
+        } catch (_: Throwable) {}
+
+        // Registrar receptor interno para fechar a tela cheia imediatamente ao finalizar/adiar pela notificação ou overlay
+        try {
+            val closeFilter = IntentFilter(ACTION_CLOSE_RINGING_UI)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                registerReceiver(closeUiReceiver, closeFilter, Context.RECEIVER_NOT_EXPORTED)
+            } else {
+                registerReceiver(closeUiReceiver, closeFilter)
             }
         } catch (_: Throwable) {}
 
@@ -178,9 +227,32 @@ class AlarmRingingActivity : ComponentActivity() {
         }
     }
 
+    private fun finishSilently() {
+        isFinishedOrProcessed = true
+        try {
+            if (activityWakeLock?.isHeld == true) {
+                activityWakeLock?.release()
+            }
+            activityWakeLock = null
+        } catch (_: Throwable) {}
+        try { AlarmOverlayManager.dismissOverlay() } catch (_: Throwable) {}
+        try {
+            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+            nm?.cancel(AlarmReceiver.NOTIFICATION_ID)
+        } catch (_: Throwable) {}
+        if (!isFinishing && !isDestroyed) {
+            try {
+                finishAndRemoveTask()
+            } catch (_: Throwable) {
+                finish()
+            }
+        }
+    }
+
     private fun executeDismiss() {
         if (isFinishedOrProcessed) return
         isFinishedOrProcessed = true
+        val dismissedAlarmId = alarmIdState.value
         try { AlarmReceiver.releaseStaticWakeLock() } catch (_: Throwable) {}
         try { AlarmSoundPlayer.stop(this) } catch (_: Throwable) {}
         try { AlarmService.stopAlarm(this) } catch (_: Throwable) {}
@@ -189,7 +261,23 @@ class AlarmRingingActivity : ComponentActivity() {
             val nm = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
             nm?.cancel(AlarmReceiver.NOTIFICATION_ID)
         } catch (_: Throwable) {}
-        finish()
+        if (dismissedAlarmId > 0L) {
+            val appCtx = applicationContext
+            CoroutineScope(Dispatchers.IO).launch {
+                try {
+                    val db = AppDatabase.getDatabase(appCtx)
+                    val alarm = db.alarmDao().getAlarmById(dismissedAlarmId)
+                    if (alarm != null && !alarm.isRepeating()) {
+                        db.alarmDao().updateAlarm(alarm.copy(isEnabled = false))
+                    }
+                } catch (_: Throwable) {}
+            }
+        }
+        try {
+            finishAndRemoveTask()
+        } catch (_: Throwable) {
+            finish()
+        }
     }
 
     private fun executeSnooze() {
@@ -216,11 +304,17 @@ class AlarmRingingActivity : ComponentActivity() {
                 volumeState.value
             )
         } catch (_: Throwable) {}
-        finish()
+        try {
+            finishAndRemoveTask()
+        } catch (_: Throwable) {
+            finish()
+        }
     }
 
     override fun onNewIntent(newIntent: Intent) {
         super.onNewIntent(newIntent)
+        isFinishedOrProcessed = false
+        activeInstance = WeakReference(this)
         setIntent(newIntent)
         applyIntent(newIntent)
     }
@@ -233,8 +327,8 @@ class AlarmRingingActivity : ComponentActivity() {
         val vib = incomingIntent.getBooleanExtra(AlarmScheduler.EXTRA_ALARM_VIBRATE, true)
         val vibOnly = incomingIntent.getBooleanExtra(AlarmScheduler.EXTRA_ALARM_VIBRATION_ONLY, false)
         val mth = incomingIntent.getBooleanExtra(AlarmScheduler.EXTRA_ALARM_MATH, false)
-        val snz = incomingIntent.getIntExtra(AlarmScheduler.EXTRA_ALARM_SNOOZE_MINS, 10)
-        val vol = incomingIntent.getFloatExtra(AlarmScheduler.EXTRA_ALARM_VOLUME, 0.8f)
+        val snz = incomingIntent.getIntExtra(AlarmScheduler.EXTRA_ALARM_SNOOZE_MINS, 5)
+        val vol = incomingIntent.getFloatExtra(AlarmScheduler.EXTRA_ALARM_VOLUME, 0.5f)
 
         alarmIdState.value = id
         labelState.value = lbl
@@ -253,8 +347,14 @@ class AlarmRingingActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        if (activeInstance?.get() === this) {
+            activeInstance = null
+        }
         try {
             unregisterReceiver(screenOffReceiver)
+        } catch (_: Throwable) {}
+        try {
+            unregisterReceiver(closeUiReceiver)
         } catch (_: Throwable) {}
         try {
             if (activityWakeLock?.isHeld == true) {

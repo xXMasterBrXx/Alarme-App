@@ -343,6 +343,7 @@ class AlarmReceiver : BroadcastReceiver() {
                 AlarmScheduler.ACTION_ALARM_DISMISS -> {
                     releaseStaticWakeLock()
                     val alarmId = intent.getLongExtra(AlarmScheduler.EXTRA_ALARM_ID, 0L)
+                    try { AlarmRingingActivity.finishIfActive(context) } catch (_: Throwable) {}
                     try { AlarmService.stopAlarm(context) } catch (_: Throwable) {}
                     try { AlarmSoundPlayer.stop(context) } catch (_: Throwable) {}
                     try { AlarmOverlayManager.dismissOverlay() } catch (_: Throwable) {}
@@ -369,9 +370,10 @@ class AlarmReceiver : BroadcastReceiver() {
                     val vibrate = intent.getBooleanExtra(AlarmScheduler.EXTRA_ALARM_VIBRATE, true)
                     val vibrationOnly = intent.getBooleanExtra(AlarmScheduler.EXTRA_ALARM_VIBRATION_ONLY, false)
                     val math = intent.getBooleanExtra(AlarmScheduler.EXTRA_ALARM_MATH, false)
-                    val snoozeMins = intent.getIntExtra(AlarmScheduler.EXTRA_ALARM_SNOOZE_MINS, 10)
-                    val volume = intent.getFloatExtra(AlarmScheduler.EXTRA_ALARM_VOLUME, 0.8f)
+                    val snoozeMins = intent.getIntExtra(AlarmScheduler.EXTRA_ALARM_SNOOZE_MINS, 5)
+                    val volume = intent.getFloatExtra(AlarmScheduler.EXTRA_ALARM_VOLUME, 0.5f)
 
+                    try { AlarmRingingActivity.finishIfActive(context) } catch (_: Throwable) {}
                     try { AlarmService.stopAlarm(context) } catch (_: Throwable) {}
                     try { AlarmSoundPlayer.stop(context) } catch (_: Throwable) {}
                     try { AlarmOverlayManager.dismissOverlay() } catch (_: Throwable) {}

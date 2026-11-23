@@ -182,6 +182,7 @@ class AlarmService : Service() {
         try {
             AlarmSoundPlayer.stop(this)
             AlarmOverlayManager.dismissOverlay()
+            AlarmRingingActivity.finishIfActive(this)
             if (wakeLock?.isHeld == true) {
                 wakeLock?.release()
             }

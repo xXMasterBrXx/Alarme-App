@@ -129,6 +129,8 @@ object AlarmOverlayManager {
                     setBackgroundColor(android.graphics.Color.TRANSPARENT)
                     setOnClickListener {
                         dismissOverlay()
+                        AlarmReceiver.releaseStaticWakeLock()
+                        AlarmRingingActivity.finishIfActive(context)
                         AlarmSoundPlayer.stop(context)
                         AlarmService.stopAlarm(context)
                         val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
@@ -161,6 +163,8 @@ object AlarmOverlayManager {
                             }
                             context.startActivity(openIntent)
                         } else {
+                            AlarmReceiver.releaseStaticWakeLock()
+                            AlarmRingingActivity.finishIfActive(context)
                             AlarmSoundPlayer.stop(context)
                             AlarmService.stopAlarm(context)
                             val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
