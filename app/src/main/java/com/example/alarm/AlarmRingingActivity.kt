@@ -341,7 +341,8 @@ class AlarmRingingActivity : ComponentActivity() {
 
         // Garante que o áudio e a vibração reflitam com precisão absoluta as configurações do alarme
         try {
-            val playInPlayer = AlarmReceiver.shouldPlayAudioInPlayer(this, snd)
+            val forcePlayer = incomingIntent.getBooleanExtra(AlarmScheduler.EXTRA_PLAY_IN_PLAYER, false)
+            val playInPlayer = AlarmReceiver.shouldPlayAudioInPlayer(this, snd, forcePlayerMode = forcePlayer)
             AlarmSoundPlayer.play(this, snd, vib, vibOnly, vol, playAudioInPlayer = playInPlayer)
         } catch (_: Throwable) {}
     }

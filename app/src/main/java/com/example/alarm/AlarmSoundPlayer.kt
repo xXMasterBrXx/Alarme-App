@@ -51,6 +51,9 @@ object AlarmSoundPlayer {
     private var currentPlayingKey: String? = null
 
     @Volatile
+    private var isUsingPlayerAudio: Boolean = false
+
+    @Volatile
     private var lastAppContext: Context? = null
 
     @Synchronized
@@ -65,7 +68,7 @@ object AlarmSoundPlayer {
         val appCtx = context.applicationContext ?: context
         lastAppContext = appCtx
         val isExternalConnected = AudioRoutingManager.checkConnectedDevices(appCtx).isExternalConnected
-        val effectivePlayInPlayer = playAudioInPlayer || isExternalConnected
+        val effectivePlayInPlayer = playAudioInPlayer || isExternalConnected || (isPlaying && isUsingPlayerAudio)
 
         val playKey = "$soundTone|$shouldVibrate|$vibrationOnly|$volume|$effectivePlayInPlayer|$isExternalConnected"
         if (isPlaying && currentPlayingKey == playKey) {
@@ -76,6 +79,7 @@ object AlarmSoundPlayer {
         // Interrompe qualquer reprodução anterior ou preview para aplicar as novas configurações
         stop(appCtx)
         isPlaying = true
+        isUsingPlayerAudio = effectivePlayInPlayer
         currentPlayingKey = playKey
 
         val targetVolume = volume.coerceIn(0.05f, 1.0f)
@@ -643,6 +647,7 @@ object AlarmSoundPlayer {
     fun stop(context: Context? = null) {
         val ctx = context?.applicationContext ?: context ?: lastAppContext
         isPlaying = false
+        isUsingPlayerAudio = false
         currentPlayingKey = null
         YouTubeAudioEngine.stopAlarm()
         stopPreview()

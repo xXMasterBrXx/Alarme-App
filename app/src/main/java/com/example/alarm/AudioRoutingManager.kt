@@ -222,29 +222,54 @@ object AudioRoutingManager {
     fun createDualOutputAudioAttributes(): AudioAttributes = createAlarmAudioAttributes(false)
 
     /**
+     * Detects whether the user is currently on a cellular or VoIP call (or receiving a call)
+     * without requiring READ_PHONE_STATE permission.
+     */
+    fun isDeviceInActiveCall(context: Context): Boolean {
+        return try {
+            val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager ?: return false
+            val mode = audioManager.mode
+            mode == AudioManager.MODE_IN_CALL ||
+                mode == AudioManager.MODE_IN_COMMUNICATION ||
+                mode == AudioManager.MODE_RINGTONE ||
+                (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                    (mode == AudioManager.MODE_CALL_SCREENING ||
+                     mode == AudioManager.MODE_CALL_REDIRECT ||
+                     mode == AudioManager.MODE_COMMUNICATION_REDIRECT))
+        } catch (_: Throwable) {
+            false
+        }
+    }
+
+    /**
      * Prepares audio streams and focus for simultaneous speaker + headphone output in MODE_NORMAL.
-     * Keeps MODE_NORMAL so both the built-in speaker (USAGE_ALARM) and connected Bluetooth/wired
-     * headphones (USAGE_MEDIA) can play together simultaneously.
+     * Keeps MODE_NORMAL when idle so both the built-in speaker (USAGE_ALARM) and connected
+     * Bluetooth/wired headphones (USAGE_MEDIA) can play together simultaneously.
+     * When the device is in an active call, preserves the call's audio mode and uses ducking focus
+     * so the call is not interrupted while the alarm still plays audibly on STREAM_ALARM.
      */
     @Synchronized
     fun configureDualAudioOutput(
         context: Context,
-        volumePercent: Float = 0.8f,
+        volumePercent: Float = 0.5f,
         forceBuiltInSpeaker: Boolean = checkConnectedDevices(context).isExternalConnected
     ) {
         try {
             val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager ?: return
             val clampedPercent = volumePercent.coerceIn(0.05f, 1.0f)
+            val inCall = isDeviceInActiveCall(context)
 
-            // 1. Garante MODE_NORMAL para permitir reprodução simultânea no alto-falante e no fone/Bluetooth
-            try {
-                if (audioManager.mode != AudioManager.MODE_NORMAL) {
-                    audioManager.mode = AudioManager.MODE_NORMAL
-                }
-            } catch (_: Throwable) {}
+            // 1. Garante MODE_NORMAL apenas quando NÃO há ligação ativa (preserva áudio da chamada)
+            if (!inCall) {
+                try {
+                    if (audioManager.mode != AudioManager.MODE_NORMAL) {
+                        audioManager.mode = AudioManager.MODE_NORMAL
+                    }
+                } catch (_: Throwable) {}
+            }
 
-            // 2. Pausar músicas/vídeos ativos solicitando foco exclusivo de áudio
-            requestAlarmAudioFocus(audioManager)
+            // 2. Solicitar foco de áudio adequado (durante ligação, usa MAY_DUCK para não derrubar a chamada)
+            requestAlarmAudioFocus(audioManager, inCall = inCall)
 
             // 3. Ajustar volume do fluxo de alarme (alto-falante do celular)
             try {
@@ -253,9 +278,9 @@ object AudioRoutingManager {
                 audioManager.setStreamVolume(AudioManager.STREAM_ALARM, desiredStreamVol, 0)
             } catch (_: Throwable) {}
 
-            // 4. Se houver fone conectado, ajustar também o volume do fluxo de mídia para que o toque saia audível no fone
-            // (salvando o volume original para restaurar ao desligar/adiar o alarme)
-            if (forceBuiltInSpeaker) {
+            // 4. Se houver fone conectado e não estiver em chamada, ajustar também o volume do fluxo de mídia
+            // para que o toque saia audível no fone (salvando o volume original para restaurar ao desligar/adiar)
+            if (forceBuiltInSpeaker && !inCall) {
                 try {
                     if (!hasSavedMusicVolume) {
                         previousMusicVolume = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
@@ -271,14 +296,19 @@ object AudioRoutingManager {
         }
     }
 
-    private fun requestAlarmAudioFocus(audioManager: AudioManager) {
+    private fun requestAlarmAudioFocus(audioManager: AudioManager, inCall: Boolean = false) {
         try {
+            val focusGain = if (inCall) {
+                AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK
+            } else {
+                AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE
+            }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 activeFocusRequest?.let {
                     try { audioManager.abandonAudioFocusRequest(it) } catch (_: Throwable) {}
                 }
                 val attrs = createAlarmAudioAttributes(false)
-                val req = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE)
+                val req = AudioFocusRequest.Builder(focusGain)
                     .setAudioAttributes(attrs)
                     .setAcceptsDelayedFocusGain(false)
                     .setWillPauseWhenDucked(false)
@@ -290,7 +320,7 @@ object AudioRoutingManager {
                 audioManager.requestAudioFocus(
                     null,
                     AudioManager.STREAM_ALARM,
-                    AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE
+                    focusGain
                 )
             }
         } catch (_: Throwable) {}

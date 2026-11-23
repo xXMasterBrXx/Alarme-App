@@ -25,6 +25,8 @@ object AlarmScheduler {
     const val EXTRA_ALARM_MATH = "extra_alarm_math"
     const val EXTRA_ALARM_SNOOZE_MINS = "extra_alarm_snooze_mins"
     const val EXTRA_ALARM_VOLUME = "extra_alarm_volume"
+    const val EXTRA_NOTIFICATION_ONLY_MODE = "extra_notification_only_mode"
+    const val EXTRA_PLAY_IN_PLAYER = "extra_play_in_player"
 
     fun scheduleAlarm(context: Context, alarm: AlarmEntity) {
         if (!alarm.isEnabled) {

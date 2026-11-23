@@ -18,13 +18,14 @@ class AlarmService : Service() {
         const val ACTION_STOP_ALARM = "com.example.ACTION_STOP_ALARM"
         private const val TAG = "AlarmService"
 
-        fun startAlarm(context: Context, intent: Intent) {
-            try {
+        fun startAlarm(context: Context, intent: Intent): Boolean {
+            return try {
                 val serviceIntent = Intent(context, AlarmService::class.java).apply {
                     action = ACTION_START_ALARM
                     putExtras(intent)
                 }
                 ContextCompat.startForegroundService(context, serviceIntent)
+                true
             } catch (t: Throwable) {
                 Log.e(TAG, "Falha ao iniciar ForegroundService em AlarmService", t)
                 // Fallback de emergência caso o sistema restrinja o serviço
@@ -32,10 +33,18 @@ class AlarmService : Service() {
                     val snd = intent.getStringExtra(AlarmScheduler.EXTRA_ALARM_SOUND) ?: "gentle"
                     val vib = intent.getBooleanExtra(AlarmScheduler.EXTRA_ALARM_VIBRATE, true)
                     val vibOnly = intent.getBooleanExtra(AlarmScheduler.EXTRA_ALARM_VIBRATION_ONLY, false)
-                    val vol = intent.getFloatExtra(AlarmScheduler.EXTRA_ALARM_VOLUME, 0.8f)
-                    val playInPlayer = AlarmReceiver.shouldPlayAudioInPlayer(context, snd)
+                    val vol = intent.getFloatExtra(AlarmScheduler.EXTRA_ALARM_VOLUME, 0.5f)
+                    val notificationOnly = intent.getBooleanExtra(
+                        AlarmScheduler.EXTRA_NOTIFICATION_ONLY_MODE,
+                        AlarmReceiver.shouldUseNotificationOnlyMode(context)
+                    )
+                    val playInPlayer = intent.getBooleanExtra(
+                        AlarmScheduler.EXTRA_PLAY_IN_PLAYER,
+                        AlarmReceiver.shouldPlayAudioInPlayer(context, snd, forcePlayerMode = notificationOnly)
+                    )
                     AlarmSoundPlayer.play(context, snd, vib, vibOnly, vol, playAudioInPlayer = playInPlayer)
                 } catch (_: Throwable) {}
+                false
             }
         }
 
@@ -75,15 +84,25 @@ class AlarmService : Service() {
                 val vibrate = intent.getBooleanExtra(AlarmScheduler.EXTRA_ALARM_VIBRATE, true)
                 val vibrationOnly = intent.getBooleanExtra(AlarmScheduler.EXTRA_ALARM_VIBRATION_ONLY, false)
                 val math = intent.getBooleanExtra(AlarmScheduler.EXTRA_ALARM_MATH, false)
-                val snoozeMins = intent.getIntExtra(AlarmScheduler.EXTRA_ALARM_SNOOZE_MINS, 10)
-                val volume = intent.getFloatExtra(AlarmScheduler.EXTRA_ALARM_VOLUME, 0.8f)
+                val snoozeMins = intent.getIntExtra(AlarmScheduler.EXTRA_ALARM_SNOOZE_MINS, 5)
+                val volume = intent.getFloatExtra(AlarmScheduler.EXTRA_ALARM_VOLUME, 0.5f)
+                val notificationOnlyMode = if (intent.hasExtra(AlarmScheduler.EXTRA_NOTIFICATION_ONLY_MODE)) {
+                    intent.getBooleanExtra(AlarmScheduler.EXTRA_NOTIFICATION_ONLY_MODE, false)
+                } else {
+                    AlarmReceiver.shouldUseNotificationOnlyMode(this)
+                }
 
                 // 1. Manter CPU ativa continuamente
                 acquireWakeLock()
 
-                val playInPlayer = AlarmReceiver.shouldPlayAudioInPlayer(this, sound)
+                val playInPlayer = if (intent.hasExtra(AlarmScheduler.EXTRA_PLAY_IN_PLAYER)) {
+                    intent.getBooleanExtra(AlarmScheduler.EXTRA_PLAY_IN_PLAYER, notificationOnlyMode)
+                } else {
+                    AlarmReceiver.shouldPlayAudioInPlayer(this, sound, forcePlayerMode = notificationOnlyMode)
+                }
 
                 // 2. Construir e fixar imediatamente notificação em primeiro plano
+                // onlyAlertOnce = true evita re-disparar ou interromper a notificação heads-up já emitida pelo AlarmReceiver
                 val notification = AlarmReceiver.buildAlarmNotification(
                     context = this,
                     alarmId = alarmId,
@@ -94,7 +113,9 @@ class AlarmService : Service() {
                     math = math,
                     snoozeMins = snoozeMins,
                     volume = volume,
-                    muteChannelSound = playInPlayer
+                    muteChannelSound = playInPlayer,
+                    useFullScreenIntent = !notificationOnlyMode,
+                    onlyAlertOnce = true
                 )
 
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -117,44 +138,46 @@ class AlarmService : Service() {
                     Log.e(TAG, "Erro ao iniciar AlarmSoundPlayer em AlarmService", t)
                 }
 
-                // 4. Exibir popup flutuante de sobreposição se autorizado
-                try {
-                    AlarmOverlayManager.showOverlay(
-                        context = this,
-                        alarmId = alarmId,
-                        label = label,
-                        sound = sound,
-                        vibrate = vibrate,
-                        vibrationOnly = vibrationOnly,
-                        math = math,
-                        snoozeMinutes = snoozeMins,
-                        volume = volume
-                    )
-                } catch (t: Throwable) {
-                    Log.e(TAG, "Erro ao exibir overlay de alarme", t)
-                }
-
-                // 5. Iniciar atividade em tela cheia diretamente
-                try {
-                    val ringingIntent = Intent(this, AlarmRingingActivity::class.java).apply {
-                        setFlags(
-                            Intent.FLAG_ACTIVITY_NEW_TASK or
-                            Intent.FLAG_ACTIVITY_CLEAR_TOP or
-                            Intent.FLAG_ACTIVITY_SINGLE_TOP or
-                            Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
+                // 4 e 5. Exibir overlay e abrir tela cheia SOMENTE quando NÃO estiver em outro app ou ligação
+                if (!notificationOnlyMode) {
+                    try {
+                        AlarmOverlayManager.showOverlay(
+                            context = this,
+                            alarmId = alarmId,
+                            label = label,
+                            sound = sound,
+                            vibrate = vibrate,
+                            vibrationOnly = vibrationOnly,
+                            math = math,
+                            snoozeMinutes = snoozeMins,
+                            volume = volume
                         )
-                        putExtra(AlarmScheduler.EXTRA_ALARM_ID, alarmId)
-                        putExtra(AlarmScheduler.EXTRA_ALARM_LABEL, label)
-                        putExtra(AlarmScheduler.EXTRA_ALARM_SOUND, sound)
-                        putExtra(AlarmScheduler.EXTRA_ALARM_VIBRATE, vibrate)
-                        putExtra(AlarmScheduler.EXTRA_ALARM_VIBRATION_ONLY, vibrationOnly)
-                        putExtra(AlarmScheduler.EXTRA_ALARM_MATH, math)
-                        putExtra(AlarmScheduler.EXTRA_ALARM_SNOOZE_MINS, snoozeMins)
-                        putExtra(AlarmScheduler.EXTRA_ALARM_VOLUME, volume)
+                    } catch (t: Throwable) {
+                        Log.e(TAG, "Erro ao exibir overlay de alarme", t)
                     }
-                    startActivity(ringingIntent)
-                } catch (t: Throwable) {
-                    Log.w(TAG, "startActivity suprimido pelo SO, tela cheia assegurada pela notificação", t)
+
+                    try {
+                        val ringingIntent = Intent(this, AlarmRingingActivity::class.java).apply {
+                            setFlags(
+                                Intent.FLAG_ACTIVITY_NEW_TASK or
+                                Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                                Intent.FLAG_ACTIVITY_SINGLE_TOP or
+                                Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
+                            )
+                            putExtra(AlarmScheduler.EXTRA_ALARM_ID, alarmId)
+                            putExtra(AlarmScheduler.EXTRA_ALARM_LABEL, label)
+                            putExtra(AlarmScheduler.EXTRA_ALARM_SOUND, sound)
+                            putExtra(AlarmScheduler.EXTRA_ALARM_VIBRATE, vibrate)
+                            putExtra(AlarmScheduler.EXTRA_ALARM_VIBRATION_ONLY, vibrationOnly)
+                            putExtra(AlarmScheduler.EXTRA_ALARM_MATH, math)
+                            putExtra(AlarmScheduler.EXTRA_ALARM_SNOOZE_MINS, snoozeMins)
+                            putExtra(AlarmScheduler.EXTRA_ALARM_VOLUME, volume)
+                            putExtra(AlarmScheduler.EXTRA_PLAY_IN_PLAYER, playInPlayer)
+                        }
+                        startActivity(ringingIntent)
+                    } catch (t: Throwable) {
+                        Log.w(TAG, "startActivity suprimido pelo SO, tela cheia assegurada pela notificação", t)
+                    }
                 }
             }
         } catch (t: Throwable) {

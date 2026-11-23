@@ -87,6 +87,22 @@ import com.example.ui.timer.TimerScreen
 
 class MainActivity : ComponentActivity() {
 
+    companion object {
+        @Volatile
+        var isInForeground: Boolean = false
+            private set
+    }
+
+    override fun onResume() {
+        super.onResume()
+        isInForeground = true
+    }
+
+    override fun onPause() {
+        isInForeground = false
+        super.onPause()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
